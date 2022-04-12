@@ -17,56 +17,9 @@
 ; Brainfuck Code with Newline Terminator
 ; ===================================================================
 ; Note: Since the brainfuck code definition is described here, it
-;       can be found in the code memory starting at location 0x0006.
+;       can be found in the code memory starting at location 0x0000.
 ;
-SYMBOLS:    DB '+-<>,.'
-BRAINFUCK:  DB '[.]', 00h
-
-
-; ===================================================================
-; Flow Handling
-; ===================================================================
-;---------------------------------------------------------------------
-; This function is the entry point to the program.
-;
-MAIN:
-LCALL USE_BANK0             ; Select 0th Memory Bank 
-LCALL PARSE                 ; Parse
-
-
-;---------------------------------------------------------------------
-; This function is an endpoint that loops back to itself continuously
-; and hence does never finish. Redirect here if your program
-; effectively has come to an end
-;
-FINISH: SJMP FINISH
-
-
-;---------------------------------------------------------------------
-; This function is equivalent to FINISH above. However, it denotes
-; that something has gone wrong.
-;
-ERROR: SJMP ERROR
-
-
-; ===================================================================
-; Memory Bank Selection
-; ===================================================================
-;---------------------------------------------------------------------
-; This function select the 0th memory bank.
-;
-USE_BANK0:
-CLR RS0
-CLR RS1
-RET
-
-;---------------------------------------------------------------------
-; This function select the 1st memory bank.
-;
-USE_BANK3:
-SETB RS0
-SETB RS1
-RET
+CODE:  DB '+[.[]]', 00h
 
 
 ; ===================================================================
@@ -123,6 +76,45 @@ LCALL HANDLE_CLOSED_BRACKET ; Push entry for closed bracket
 _parse_prepare_next:
 LCALL INC_DPTR              ; Let DPTR point to next symbol
 SJMP _parse_read_next       ; Read next symbol
+
+
+;---------------------------------------------------------------------
+; This function checks whether the byte in register A is a valid
+; brainfuck operator (exception bracket).
+;
+; In:  A
+; Out: F0 flag (false = '0', true = '1')
+;
+IS_VALID_OPERATOR:
+CLR     F0                  ; Output is false (symbol not validated)
+_is_plus:
+CJNE    A, #2Bh, _is_comma
+SJMP    _is_valid
+
+_is_comma:
+CJNE    A, #2Ch, _is_minus
+SJMP    _is_valid
+
+_is_minus:
+CJNE    A, #2Dh, _is_point
+SJMP    _is_valid
+
+_is_point:
+CJNE    A, #2Eh, _is_left
+SJMP    _is_valid
+
+_is_left:
+CJNE    A, #3Ch, _is_right
+SJMP    _is_valid
+
+_is_right:
+CJNE    A, #3Eh, _exit_validation
+
+_is_valid:
+SETB    F0                  ; Output is true (symbol validated)
+
+_exit_validation:
+RET
 
 
 ;---------------------------------------------------------------------
@@ -257,68 +249,6 @@ LCALL USE_BANK0             ; Select 0th memory bank
 LCALL PUSH_TPTR
 LCALL POP_DPTR              ; Restore DPTR
 RET
-
-
-;---------------------------------------------------------------------
-; This function checks that the byte provided in register A is a valid
-; operator (except for brackets) of the brainfuck language. If it is,
-; the register A contains the value '1', otherwise it contains '0'.
-;
-; In:  A
-; Out: A (0 = false, > 0 = true)
-; 
-; Overwrites: R2 as A backup (temporary)
-;
-IS_VALID_OPERATOR:
-LCALL PUSH_DPTR             ; Backup DPTR
-MOV R2, A                   ; Backup A into R2 for further use
-                            ; Not restored into A, because it is used
-                            ; for validation output flag
-MOV DPTR, #05h              ; Setup iterator index
-
-_validate_symbol:
-MOV A, #00h                 ; Clear A, only DPTR should decide target
-MOVC A, @A+DPTR             ; Load next symbol from code memory
-MOV B, A                    ; Load A into B
-MOV A, R2                   ; Restore A
-SUBB A, B                   ; Subtract symbol from symbol under test
-CLR C                       
-JZ _is_valid                ; They are the same symbol (hence A valid)
-
-; TODO REPLACE WITH CJNE
-LCALL SQUASH_DPTR           ; Squash DPTR (A = 0 = 'false')
-JZ _validation_done         ; No symbol was matches yet and DPTR = 0
-                            ; (no more left)
-
-LCALL DEC_DPTR              ; Decrement DPTR
-SJMP _validate_symbol       ; There are some symbols left, so compare
-
-_is_valid:
-; TODO USE CUSTOM FLAG INSTEAD
-MOV A, #01h                 ; Write 'true' into A
-
-_validation_done:
-LCALL POP_DPTR              ; Restore DPTR
-RET
-
-
-; ===================================================================
-; Error Handling
-; ===================================================================
-;---------------------------------------------------------------------
-; This function reports an invalid symbol encountered during parsing.
-; 
-REPORT_INVALID_SYMBOL:
-; TODO: Report in some way
-LCALL ERROR
-
-
-;---------------------------------------------------------------------
-; This function reports an unbalanced bracket encountered during parsing.
-;
-REPORT_UNBALANCED_BRACKET:
-; TODO: Report in some way
-LCALL ERROR
 
 
 ; ===================================================================
@@ -546,3 +476,76 @@ SJMP _clear_next            ; Overwrite next byte
 
 _clear_done:
 RET
+
+
+; ===================================================================
+; Flow Handling
+; ===================================================================
+;---------------------------------------------------------------------
+; This function is the entry point to the program.
+;
+MAIN:
+LCALL USE_BANK0             ; Select 0th Memory Bank 
+LCALL PARSE                 ; Parse
+
+
+;---------------------------------------------------------------------
+; This function is an endpoint that loops back to itself continuously
+; and hence does never finish. Redirect here if your program
+; effectively has come to an end
+;
+FINISH: SJMP FINISH
+
+
+;---------------------------------------------------------------------
+; This function is equivalent to FINISH above. However, it denotes
+; that something has gone wrong.
+;
+ERROR: SJMP ERROR
+
+
+; ===================================================================
+; Memory Bank Selection
+; ===================================================================
+;---------------------------------------------------------------------
+; This function select the 0th memory bank.
+;
+USE_BANK0:
+CLR RS0
+CLR RS1
+RET
+
+;---------------------------------------------------------------------
+; This function select the 1st memory bank.
+;
+USE_BANK3:
+SETB RS0
+SETB RS1
+RET
+
+
+; ===================================================================
+; Error Handling
+; ===================================================================
+;---------------------------------------------------------------------
+; This function reports an invalid symbol encountered during parsing.
+; 
+REPORT_INVALID_SYMBOL:
+; TODO: Report invalid symbol in some manner
+LCALL ERROR
+
+
+;---------------------------------------------------------------------
+; This function reports an unbalanced bracket encountered during parsing.
+;
+REPORT_UNBALANCED_BRACKET:
+; TODO: Report unbalanced bracket in some way
+LCALL ERROR
+
+
+;---------------------------------------------------------------------
+; This function reports too many brackets encountered during parsing.
+;
+REPORT_TOO_MANY_BRACKETS:
+; TODO: Report too many brackets in some way
+LCALL ERROR
