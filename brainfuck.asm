@@ -2,17 +2,18 @@
 ; Register Table:
 ; ~~~~~~~~~~~~~~~~
 ; Memory Bank [0]:
-; R7 (UH) + R6 (LH):    DPTR Backup Registers (Volatile, Reserved)
-; R5 (UH) + R4 (LH):    Table Pointer (Volatile, Reserved)
-; R2:                   Backup for Symbol Validation (Temp)
-; R1 (UH) + R0 (LH):    Stack Pointer
+; R7 (UH) + R6 (LH):    DPTR Backup (Volatile, Reserved)
+; R5 (UH) + R4 (LH):    TPTR Backup (Volatile, Reserved)
+; R1 (UH) + R0 (LH):    XSTACK Backup
 ;                       [During Parsing] (Volatile, Reserved)
-;                       Null-Terminator Pointer For Brainfuck Code
+;                       End Pointer of Code
 ;                       [After Parsing] (Permanent, Reserved)    
 ; 
-; Memory Bank [1]:
-; R5 (UH) + R4 (LH):    Table Pointer
-; R3 (UH) + R2 (LH):    Symbol Pointer
+; Memory Bank [3]:
+; R7 (UH) + R6 (LH):    TPTR Before Close Bracket Entry
+; R5 (UH) + R4 (LH):    TPTR After Close Bracket Entry
+; R3 (UH) + R2 (LH):    TPTR Of Open Bracket
+; R1 (UH) + R0 (LH):    Symbol Pointer
 ; ===================================================================
 ; Brainfuck Code with Newline Terminator
 ; ===================================================================
@@ -26,56 +27,50 @@ CODE:  DB '+[.[]]', 00h
 ; Parsing
 ; ===================================================================
 ;---------------------------------------------------------------------
-; This function iterates over each symbol. It asserts the code's
-; validity, tracks its length and constructs a bracket table used for 
-; quickly executing loops.
+; This function iterates over the code and parses it.
+;
+; It checks for validity, tracks the code's length and constructs a
+; bracket table used for quickly executing loops during interpretation.
 ;
 ; Overwrites: R1 (DPH) and R0 (DPL) as code length (permanent)
 ;
 PARSE:
 ; ==- Prelude
-LCALL INIT_XSTACK
-MOV DPTR, #0006h            ; Let DPTR point to start of code
+LCALL   INIT_XSTACK
+MOV     DPTR, #0000h   
 
-_parse_read_next:
-MOV A,  #00h                ; Clear A, only DPTR should decide target
-MOVC A, @A+DPTR             ; Load next symbol from code memory
-JNZ _parse_handle           ; Symbol is not terminator, so prepare
-                            ; for next and read
+_parse_next_symbol:
+MOV     A, #00h
+MOVC    A, @A+DPTR          ; Load symbol from code memory
+JNZ     _parse_process      ; Read symbol is null-terminator
 
-; TODO Check for unbalanced brackets
-MOV R0, DPL                 ; Symbol is terminator, so backup DPTR
-MOV R1, DPH                 ; representing last symbol position into
-RET                         ; R0 and R1
+; ==- Parsing Exit
+; TODO: Check for unbalanced brackets
+MOV     R0, DPL             ; Backup terminator location from DPTR
+MOV     R1, DPH
+LCALL   FINISH
 
-_parse_handle:
-LCALL IS_VALID_OPERATOR     ; Symbol not terminator, but is it valid?
-JNZ _parse_prepare_next     ; Validation successful, target next symbol
+; ==- Process Symbol
+_parse_process:
+LCALL   IS_VALID_OPERATOR
+JB      F0, _parse_prepare  ; Valid symbol, ready for next
 
-MOV A, R2                   ; Restore A from R2 (backup done by validation
-                            ; call but A not restored to old value because
-                            ; used for output)
-SUBB A, #5Bh                ; Subtract code for '[' from read symbol
-CLR C
-JZ _handle_open_bracket     ; Symbol is open bracket
+_parse_opened_bracket:
+CJNE    A, #5Bh, _parse_closed_bracket  ; Check if symbol is opened bracket 
+LCALL   HANDLE_OPENED_BRACKET           ; Handle opened bracket
+SJMP    _parse_prepare                  ; Ready for next symbol
 
-MOV A, R2                   ; Restore A from R2 (see above)
-SUBB A, #5Dh                ; Subtract code for ']' from read symbol
-CLR C
-JZ _handle_closed_bracket   ; Symbol is closed bracket
+_parse_closed_bracket:
+CJNE    A, #5Dh, _parse_invalid         ; Check if symbol is closed bracket
+LCALL   HANDLE_CLOSED_BRACKET           ; Handle closed bracket
+SJMP    _parse_prepare                  ; Ready for next symbol
 
-LCALL REPORT_INVALID_SYMBOL ; Symbol is invalid and gets reported
+_parse_invalid:
+LCALL   REPORT_INVALID_SYMBOL
 
-_handle_open_bracket:
-LCALL HANDLE_OPEN_BRACKET   ; Push entry for open bracket
-SJMP _parse_prepare_next    ; Read next symbol
-
-_handle_closed_bracket:
-LCALL HANDLE_CLOSED_BRACKET ; Push entry for closed bracket
-
-_parse_prepare_next:
-LCALL INC_DPTR              ; Let DPTR point to next symbol
-SJMP _parse_read_next       ; Read next symbol
+_parse_prepare:
+LCALL   INC_DPTR            ; Point to next symbol
+SJMP    _parse_next_symbol
 
 
 ;---------------------------------------------------------------------
@@ -129,7 +124,7 @@ RET
 ;   +--------+--------+--------+--------+--------+--------+
 ;
 ;
-HANDLE_OPEN_BRACKET:
+HANDLE_OPENED_BRACKET:
 ; ==- Prelude
 LCALL PUSH_DPTR             ; Backup DPTR into R7 (UH) and R6 (LH)
 LCALL POP_XSTACK            ; Restore XSTACK into DPTR
