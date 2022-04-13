@@ -24,6 +24,33 @@ CODE:  DB '+[.[]]', 00h
 
 
 ; ===================================================================
+; Flow Handling
+; ===================================================================
+;---------------------------------------------------------------------
+; This function is the entry point to the program.
+;
+MAIN:
+LCALL   USE_BANK0
+LCALL   CLEAR_DATA_AREA
+LCALL   PARSE
+
+
+;---------------------------------------------------------------------
+; This function is an endpoint that loops back to itself continuously
+; and hence does never finish. Redirect here if your program
+; effectively has come to an end
+;
+FINISH: SJMP FINISH
+
+
+;---------------------------------------------------------------------
+; This function is equivalent to FINISH above. However, it denotes
+; that something has gone wrong.
+;
+ERROR: SJMP ERROR
+
+
+; ===================================================================
 ; Parsing
 ; ===================================================================
 ;---------------------------------------------------------------------
@@ -257,8 +284,8 @@ RET
 ; wanted data.
 ;
 PUSH_TPTR:
-MOV R4, DPL                 ; Load lower half of TPTR pointer into R4
-MOV R5, DPH                 ; Load upper half of TPTR pointer into R5
+MOV     R4, DPL
+MOV     R5, DPH
 RET
 
 
@@ -267,29 +294,29 @@ RET
 ; explanation, see PUSH_TPTR above.
 ; 
 POP_TPTR:
-MOV DPL, R4                 ; Load lower half of TPTR into DPTR
-MOV DPH, R5                 ; Load upper half of TPTR into DPTR
+MOV     DPL, R4
+MOV     DPH, R5
 RET
 
 
 ;---------------------------------------------------------------------
 ; This function moves TPTR by four bytes, so that it points to the
-; following table entry.
+; next table entry.
 ;
 TABLE_NEXT_ENTRY:
-LCALL INC_DPTR              ; Incremens TPTR by four bytes (one entry)
-LCALL INC_DPTR
-LCALL INC_DPTR
-LCALL INC_DPTR
+LCALL   INC_DPTR
+LCALL   INC_DPTR
+LCALL   INC_DPTR
+LCALL   INC_DPTR
 RET
  
 
 ;---------------------------------------------------------------------
-; This function increments TPTR by one. There is no decrement defined
-; for 16-bit values. 
+; This function increments TPTR by one.
+; There is no decrement defined for 16-bit values. 
 ;
 INC_TPTR:
-LCALL INC_DPTR              ; Increment TPTR by one
+LCALL   INC_DPTR
 RET
 
 
@@ -301,8 +328,8 @@ RET
 ; of the external memory, so that it can grow downwards.
 ;
 INIT_XSTACK:
-MOV R0, #255d
-MOV R1, #255d
+MOV     R0, #255d
+MOV     R1, #255d
 RET
 
 
@@ -314,8 +341,8 @@ RET
 ; wanted data.
 ;
 PUSH_XSTACK:
-MOV R0, DPL                 ; Load lower half of XSTACK pointer into R0
-MOV R1, DPH                 ; Load upper half of XSTACK pointer into R1
+MOV     R0, DPL
+MOV     R1, DPH
 RET
 
 
@@ -324,8 +351,8 @@ RET
 ; explanation, see PUSH_XSTACK above.
 ; 
 POP_XSTACK:
-MOV DPL, R0                 ; Load lower half of XSTACK pointer into DPTR
-MOV DPH, R1                 ; Load upper half of XSTACK pointer into DPTR
+MOV     DPL, R0
+MOV     DPH, R1
 ret
 
 
@@ -339,7 +366,7 @@ ret
 ; Note: Destroys C(arry) Flag (begin and end)
 ;
 DEC_XSTACK:
-LCALL INC_DPTR              ; Incrementing the DPTR moves the XSTACK
+LCALL   INC_DPTR            ; Incrementing the DPTR moves the XSTACK
 RET                         ; pointer closer to the stack's base,
                             ; effectively shrinking it
 
@@ -351,7 +378,7 @@ RET                         ; pointer closer to the stack's base,
 ; Note: Destroys C(arry) Flag (begin and end)
 ;
 INC_XSTACK:
-LCALL DEC_DPTR              ; Decrementing the DPTR moves the XSTACK
+LCALL   DEC_DPTR            ; Decrementing the DPTR moves the XSTACK
 RET                         ; pointer farther from the stack's base,
                             ; effectively growing it
 
@@ -360,90 +387,84 @@ RET                         ; pointer farther from the stack's base,
 ; DPTR Handling
 ; ===================================================================
 ;---------------------------------------------------------------------
-; This function "pushes" DPTR by storing it into R7 (DPH) and R6 (DPL)
+; This function "pushes" DPTR by storing it into R7 (UH) and R6 (LH)
 ; in order to avoid pushing onto the regular stack. Doing so makes it
 ; difficult to retrieve the two DPTR bytes on top of the stack using
 ; a function, as the return address is also pushed, burrying the
 ; wanted data.
 ;
 PUSH_DPTR:
-MOV R6, DPL                 ; Store lower half (DPL) into R6
-MOV R7, DPH                 ; Store upper half (DPH) into R7
+MOV     R6, DPL
+MOV     R7, DPH
 RET
 
 
 ;---------------------------------------------------------------------
-; This function "pops" DPTR from R7 (DPH) and R6 (DPL). For further
+; This function "pops" DPTR from R7 (UH) and R6 (LH). For further
 ; explanation, see PUSH_DPTR above.
 ; 
 POP_DPTR:
-MOV DPL, R6                 ; Restore lower half (DPL) from R6
-MOV DPH, R7                 ; Restore upper half (DPH) from R7
+MOV     DPL, R6
+MOV     DPH, R7
 RET
 
 
 ;---------------------------------------------------------------------
-; This function squashes DPTR by applying a logical or to both its
-; bytes. Can be used to subsequently check if DPTR is actually zero.
+; This function reduces DPTR to a bit mask by applying a logical or
+; to its lower and upper half. That can be used to check if DPTR is
+; zero.
 ;
-SQUASH_DPTR:
-MOV A, DPH                  ; Load upper half of DPTR into A
-MOV B, DPL                  ; Load lower half of DPTR into B
-ORL A, B                    ; Apply logical or to both halfs
+OR_DPTR:
+MOV     A, DPL
+MOV     B, DPH
+ORL     A, B
 RET
 
 
 ;---------------------------------------------------------------------
-; This function decrements DPTR by one. There is no decrement defined
-; for 16-bit values.
+; This function decrements DPTR by one.
+; There is no decrement defined for 16-bit values.
 ; 
 ; Note: Destroys C(arry) Flag (begin and end)
 ;
 DEC_DPTR:
-CLR C                       ; Clear carry for later changes
-PUSH A                      ; Backup A onto stack
+CLR     C                   ; Remove unrelated carry
+PUSH    A                   ; Backup A
 
-MOV A, DPL                  ; Load lower half into A
-SUBB A, #01h                ; Decrement A (carry might be set!)
+MOV     A, DPL              ; Decrement lower half
+SUBB    A, #01h
 
-JNC _store_lower_dptr       ; When carry not set, the upper half DPH
-                            ; will not be affected and the lower half
-                            ; can be stored directly
+JNC     _store_lower_dptr   ; When no carry, the upper half
+                            ; is unaffected
 
-DEC DPH                     ; Decrement upper half (carry not affected)
-CLR C                       ; Clear C (might be set by decrement of A)
-                            ; so that it does not interfere with
-                            ; following subb			
+DEC     DPH                 ; Decrement upper half
+CLR     C                   ; Clear carry of SUBB		
 
 _store_lower_dptr:
-MOV DPL, A                  ; Load lower half from A
-POP A                       ; Restore A from stack
+MOV     DPL, A              ; Store lower half
+POP     A                   ; Restore A
 RET
 
 
 ;---------------------------------------------------------------------
-; This function increments DPTR by one. There is no increment defined
-; for 16-bit values.
+; This function increments DPTR by one.
+; There is no increment defined for 16-bit values.
 ;
 ; Note: Destroys C(arry) Flag (begin and end)
 ;
 INC_DPTR:
-CLR C                       ; Clear carry for later changes
-PUSH A                      ; Backup A onto stack
+CLR     C                   ; Remove unrelated carry           
+PUSH    A                   ; Backup A
 
-MOV A, DPL                  ; Load lower half into A
-ADD A, #01h                 ; Increment A (carry might be set!)
+MOV     A, DPL              ; Increment lower half
+ADD     A, #01h
+JNC     _store_lower_dptr   ; When no carry, the upper half
+                            ; is unaffected
 
-JNC _store_lower_dptr       ; When carry not set, the upper half DPH
-                            ; will not be affected and the lower half
-                            ; can be stored directly
+INC     DPH                 ; Increment upper half
+CLR     C                   ; Clear carry of ADD
 
-INC DPH                     ; Increment upper half (carry not affected)
-CLR C                       ; Clear C (might be set by increment of A)
-                            ; so that is does not interfere with
-                            ; following subb
-
-SJMP _store_lower_dptr      ; Load lower half from A
+SJMP    _store_lower_dptr   ; Store lower half
 
 
 ; ===================================================================
@@ -456,66 +477,39 @@ SJMP _store_lower_dptr      ; Load lower half from A
 ; bytes. There are 256 storage cells and they are one byte wide each.
 ;
 CLEAR_DATA_AREA:
-MOV DPTR, #08FFh
+MOV     DPTR, #08FFh
 
-_clear_next:
-MOV A, #00h                 ; Load overwriting value
-MOVX @DPTR, A               ; Overwrite target byte
+_clear_next_byte:
+MOV     A, #00h             ; Zero out target byte
+MOVX    @DPTR, A
 
-LCALL SQUASH_DPTR           ; Squash DPTR
-JZ _clear_done              ; If A = 0, then DPTR = 0 and the last
-                            ; byte has been overwritten
+LCALL   OR_DPTR             ; Or both bytes of DPTR and exit
+JZ      _exit_clear         ; if DPTR has reached zero
 
-LCALL DEC_DPTR              ; Decrement DPTR
-SJMP _clear_next            ; Overwrite next byte             
+LCALL   DEC_DPTR
+SJMP    _clear_next_byte
 
-_clear_done:
+_exit_clear:
 RET
-
-
-; ===================================================================
-; Flow Handling
-; ===================================================================
-;---------------------------------------------------------------------
-; This function is the entry point to the program.
-;
-MAIN:
-LCALL USE_BANK0             ; Select 0th Memory Bank 
-LCALL PARSE                 ; Parse
-
-
-;---------------------------------------------------------------------
-; This function is an endpoint that loops back to itself continuously
-; and hence does never finish. Redirect here if your program
-; effectively has come to an end
-;
-FINISH: SJMP FINISH
-
-
-;---------------------------------------------------------------------
-; This function is equivalent to FINISH above. However, it denotes
-; that something has gone wrong.
-;
-ERROR: SJMP ERROR
 
 
 ; ===================================================================
 ; Memory Bank Selection
 ; ===================================================================
 ;---------------------------------------------------------------------
-; This function select the 0th memory bank.
+; This function selects the 0th memory bank.
 ;
 USE_BANK0:
-CLR RS0
-CLR RS1
+CLR     RS0
+CLR     RS1
 RET
 
 ;---------------------------------------------------------------------
-; This function select the 1st memory bank.
+; This function selects the 3rd memory bank.
 ;
 USE_BANK3:
-SETB RS0
-SETB RS1
+SETB    RS0
+SETB    RS1
 RET
 
 
@@ -527,7 +521,7 @@ RET
 ; 
 REPORT_INVALID_SYMBOL:
 ; TODO: Report invalid symbol in some manner
-LCALL ERROR
+LCALL   ERROR
 
 
 ;---------------------------------------------------------------------
@@ -535,7 +529,7 @@ LCALL ERROR
 ;
 REPORT_UNBALANCED_BRACKET:
 ; TODO: Report unbalanced bracket in some way
-LCALL ERROR
+LCALL   ERROR
 
 
 ;---------------------------------------------------------------------
@@ -543,4 +537,4 @@ LCALL ERROR
 ;
 REPORT_TOO_MANY_BRACKETS:
 ; TODO: Report too many brackets in some way
-LCALL ERROR
+LCALL   ERROR
