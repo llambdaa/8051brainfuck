@@ -31,7 +31,7 @@ CODE:  DB '+[.[]]', 00h
 ;
 MAIN:
 LCALL   USE_BANK0
-LCALL   CLEAR_DATA_AREA
+;LCALL   CLEAR_DATA_AREA
 LCALL   PARSE
 
 
@@ -140,44 +140,48 @@ RET
 
 
 ;---------------------------------------------------------------------
-; This function "pushes" an entry for an opening bracket onto XSTACK. 
-; 
+; This function "pushes" a table entry encoding an opened bracket
+; onto the XSTACK.
+;
 ; The first two pushed bytes encode the symbol index, which is 
 ; described by DPTR (DPH and DPL). The last two encode the table entry
 ; pointer (R5 and R4):
-
+;
 ;   +--------+--------+--------+--------+--------+--------+
 ;   |  BASE  |  ...   |  DPL   |  DPH   |   R4   |   R5   |
 ;   +--------+--------+--------+--------+--------+--------+
-;
+;   ^                                                     ^  
+; START                                           XSTACK TOP POINTER
 ;
 HANDLE_OPENED_BRACKET:
 ; ==- Prelude
-LCALL PUSH_DPTR             ; Backup DPTR into R7 (UH) and R6 (LH)
-LCALL POP_XSTACK            ; Restore XSTACK into DPTR
+LCALL PUSH_DPTR             ; Backup DPTR
+LCALL POP_XSTACK            ; Restore XSTACK (into DPTR)
 
-; ==- Push entry for open bracket onto XSTACK
-MOV A, R6                   ; Push lower half of backup DPTR onto XSTACK
+; ==- Write Table Entry For Open Bracket
+MOV A, R6                   ; Push LH of backup DPTR
 MOVX @DPTR, A               
-LCALL INC_XSTACK            ; Grow XSTACK by one byte
+LCALL INC_XSTACK            ; Move XSTACK pointer
 
-MOV A, R7                   ; Push upper half of backup DPTR onto XSTACK
+MOV A, R7                   ; Push UH of backup DPTR
 MOVX @DPTR, A               
-LCALL INC_XSTACK            ; Grow XSTACK by one byte
+LCALL INC_XSTACK
 
-MOV A, R4                   ; Push lower half of table pointer
-MOVX @DPTR, A               ; onto XSTACK
-LCALL INC_XSTACK            ; Grow XSTACK by one byte
+MOV A, R4                   ; Push LH of TPTR
+MOVX @DPTR, A
+LCALL INC_XSTACK
 
-MOV A, R5                   ; Push upper half of table pointer
-MOVX @DPTR, A               ; onto XSTACK
-LCALL INC_XSTACK            ; Grow XSTACK by one byte
+MOV A, R5                   ; Push UH of TPTR
+MOVX @DPTR, A
+LCALL INC_XSTACK
+
+; ==- Move TPTR To End
+LCALL PUSH_XSTACK           ; Backup XSTACK into R1 (UH) and R0 (LH)
+LCALL POP_TPTR              ; Restore TPTR
+LCALL TABLE_NEXT_ENTRY      ; Move TPTR by one entry
+LCALL PUSH_TPTR             ; Backup TPTR
 
 ; ==- Clean-Up
-LCALL PUSH_XSTACK           ; Backup XSTACK into R1 (UH) and R0 (LH)
-LCALL POP_TPTR
-LCALL TABLE_NEXT_ENTRY      ; Move TPTR by one entry, so four byte
-LCALL PUSH_TPTR
 LCALL POP_DPTR              ; Restore DPTR
 RET
 
