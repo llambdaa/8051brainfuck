@@ -155,31 +155,31 @@ RET
 ;
 HANDLE_OPENED_BRACKET:
 ; ==- Prelude
-LCALL PUSH_DPTR             ; Backup DPTR
-LCALL POP_XSTACK            ; Restore XSTACK (into DPTR)
+LCALL   PUSH_DPTR           ; Backup DPTR
+LCALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
 
 ; ==- Write Table Entry For Open Bracket
-MOV A, R6                   ; Push LH of backup DPTR
-MOVX @DPTR, A               
-LCALL INC_XSTACK            ; Move XSTACK pointer
+MOV     A, R6               ; Push LH of backup DPTR
+MOVX    @DPTR, A               
+LCALL   INC_XSTACK          ; Move XSTACK pointer
 
-MOV A, R7                   ; Push UH of backup DPTR
-MOVX @DPTR, A               
-LCALL INC_XSTACK
+MOV     A, R7               ; Push UH of backup DPTR
+MOVX    @DPTR, A               
+LCALL   INC_XSTACK
 
-MOV A, R4                   ; Push LH of TPTR
-MOVX @DPTR, A
-LCALL INC_XSTACK
+MOV     A, R4               ; Push LH of TPTR
+MOVX    @DPTR, A
+LCALL   INC_XSTACK
 
-MOV A, R5                   ; Push UH of TPTR
-MOVX @DPTR, A
-LCALL INC_XSTACK
+MOV     A, R5               ; Push UH of TPTR
+MOVX    @DPTR, A
+LCALL   INC_XSTACK
 
 ; ==- Move TPTR To End
-LCALL PUSH_XSTACK           ; Backup XSTACK into R1 (UH) and R0 (LH)
-LCALL POP_TPTR              ; Restore TPTR
-LCALL TABLE_NEXT_ENTRY      ; Move TPTR by one entry
-LCALL PUSH_TPTR             ; Backup TPTR
+LCALL   PUSH_XSTACK         ; Backup XSTACK
+LCALL   POP_TPTR            ; Restore TPTR
+LCALL   TABLE_NEXT_ENTRY    ; Move TPTR by one entry
+LCALL   PUSH_TPTR           ; Backup TPTR
 
 ; ==- Clean-Up
 LCALL POP_DPTR              ; Restore DPTR
@@ -194,86 +194,117 @@ RET
 ;
 HANDLE_CLOSED_BRACKET:
 ; ==- Prelude
-LCALL PUSH_DPTR             ; Backup DPTR into R7 (UH) and R6 (LH)
-LCALL POP_XSTACK            ; Restore XSTACK into DPTR
-LCALL USE_BANK3             ; Select 1st memory bank
+LCALL   PUSH_DPTR           ; Backup DPTR
+LCALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
+LCALL   USE_BANK3           ; Select 1st memory bank
 
-; ==- Read topmost table entry from XSTACK
-LCALL DEC_XSTACK            ; Shrink XSTACK
-MOVX A, @DPTR               ; Load topmost value into A
-MOV R3, A                   ; Store topmost value into R5
+; ==- Read Topmost Entry
+LCALL   READ_TOPMOST_ENTRY
 
-LCALL DEC_XSTACK
-MOVX A, @DPTR   
-MOV R2, A
+; ==- Prepare For Table Modification
+LCALL   PUSH_XSTACK         ; Backup XSTACK
+LCALL   POP_TPTR            ; Restore TPTR                
 
-LCALL DEC_XSTACK
-MOVX A, @DPTR
-MOV R1, A
+LCALL   USE_BANK3
+MOV     R6, DPL             ; Backup DPTR (currently pointing to start
+MOV     R7, DPH             ; of closed bracket entry before actually
+                            ; writing it
 
-LCALL DEC_XSTACK
-MOVX A, @DPTR
-MOV R0, A
+; ==- Write Closed Bracket Table Entry
+LCALL   WRITE_CLOSED_BRACKET
 
-; ==- Prepare for write
-LCALL USE_BANK0
-LCALL PUSH_XSTACK
-LCALL POP_TPTR
-LCALL USE_BANK3
+; ==- Prepare For Overwriting Opened Bracket Entry
+LCALL   PUSH_TPTR           ; Backup TPTR into 3rd memory bank
+MOV     DPL, R2             ; Load TPTR of opened bracket 
+MOV     DPH, R3
 
-; ==- Store start of entry
-MOV R6, DPL
-MOV R7, DPH
+; ==- Overwrite Entry Of Corresponding Opened Bracket
+LCALL   OVERWRITE_OPENED_BRACKET
 
-; ==- Write closed bracket entry into table
-MOV A, R3
-MOVX @DPTR, A
-LCALL INC_TPTR
-
-MOV A, R2
-MOVX @DPTR, A
-LCALL INC_TPTR
-
-MOV A, R1
-MOVX @DPTR, A
-LCALL INC_TPTR
-
-MOV A, R0
-MOVX @DPTR, A
-LCALL INC_TPTR
-
-; ==- Backup TPTR and move back to open bracket entry
-LCALL PUSH_TPTR             ; Backup TPTR on 1st memory bank
-MOV DPL, R2                 ; Load TPTR of open bracket
-MOV DPH, R3
-
-; ==- Overwrite entry of corresponding open bracket
-MOV A, R7
-MOVX @DPTR, A
-LCALL INC_TPTR
-
-MOV A, R6
-MOVX @DPTR, A
-LCALL INC_TPTR
-
-LCALL USE_BANK0
-
-MOV A, R7
-MOVX @DPTR, A
-LCALL INC_TPTR
-
-MOV A, R6
-MOVX @DPTR, A
-
-LCALL USE_BANK3
-
-; ==- Move TPTR back to end of table
-LCALL POP_TPTR
+; ==- Move TPTR Back To End Of Table
+LCALL   POP_TPTR
 
 ; ==- Clean-Up
-LCALL USE_BANK0             ; Select 0th memory bank
-LCALL PUSH_TPTR
-LCALL POP_DPTR              ; Restore DPTR
+LCALL   USE_BANK0           ; Select 0th memory bank
+LCALL   PUSH_TPTR           ; Backup TPTR (after writing entry)
+LCALL   POP_DPTR            ; Restore DPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function reads the topmost XSTACK table entry into the 3rd
+; memory bank (R0-R3)
+;
+READ_TOPMOST_ENTRY:
+; ==- Prelude
+LCALL   USE_BANK3           ; Select 3rd memory bank
+
+; ==- Read Entry
+LCALL   DEC_XSTACK          ; Shrink XSTACK
+MOVX    A, @DPTR            ; Load topmost value into A
+MOV     R3, A               ; Store topmost value
+
+LCALL   DEC_XSTACK
+MOVX    A, @DPTR   
+MOV     R2, A
+
+LCALL   DEC_XSTACK
+MOVX    A, @DPTR
+MOV     R1, A
+
+LCALL   DEC_XSTACK
+MOVX    A, @DPTR
+MOV     R0, A
+
+; ==- Clean-Up
+LCALL   USE_BANK0
+RET
+
+
+;---------------------------------------------------------------------
+; This function writes an entry for the currently read closed bracket.
+;
+WRITE_CLOSED_BRACKET:
+MOV     A, R3               ; Load values read from stack in step
+MOVX    @DPTR, A            ; before into new table entry
+LCALL   INC_TPTR
+
+MOV     A, R2
+MOVX    @DPTR, A
+LCALL   INC_TPTR
+
+MOV     A, R1
+MOVX    @DPTR, A
+LCALL   INC_TPTR
+
+MOV     A, R0
+MOVX    @DPTR, A
+LCALL   INC_TPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function overwrites the entry for the corresponding opened
+; bracket.
+;
+OVERWRITE_OPENED_BRACKET:
+MOV     A, R7               ; Write backup TPTR of closed bracket entry
+MOVX    @DPTR, A            ; from 3rd memory bank
+LCALL   INC_TPTR
+
+MOV     A, R6               
+MOVX    @DPTR, A
+LCALL   INC_TPTR
+
+LCALL   USE_BANK0           ; Select 0th memory bank
+MOV     A, R7               ; Write DPTR containing current symbol index 
+MOVX    @DPTR, A            ; from 0th memory bank
+LCALL   INC_TPTR
+
+MOV     A, R6
+MOVX    @DPTR, A
+
+LCALL   USE_BANK3
 RET
 
 
