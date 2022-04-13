@@ -21,7 +21,7 @@
 ; Note: Since the brainfuck code definition is described here, it
 ;       can be found in the code memory starting at location 0x0000.
 ;
-CODE:  DB '+++--', 00h
+CODE:  DB '+>+>-<<+', 00h
 
 
 ; ===================================================================
@@ -353,12 +353,12 @@ SJMP    _interp_prepare
 
 _i_is_left:
 CJNE    A, #3Ch, _i_is_right
-NOP
+ACALL   MOVE_LEFT
 SJMP    _interp_prepare
 
 _i_is_right:
 CJNE    A, #3Eh, _i_is_opened_b
-NOP
+ACALL   MOVE_RIGHT
 SJMP    _interp_prepare
 
 _i_is_opened_b:
@@ -409,6 +409,40 @@ ACALL   POP_CPTR
 MOVX    A, @DPTR                ; Load cell value into A
 DEC     A                       ; Decrement value
 MOVX    @DPTR, A                ; Load cell back to external memory
+
+; ==- Clean-Up
+ACALL   PUSH_CPTR
+ACALL   POP_DPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function moves the CPTR one cell to the right.
+;
+MOVE_RIGHT:
+; ==- Prelude
+ACALL   PUSH_DPTR
+ACALL   POP_CPTR
+
+; ==- Increment
+ACALL   INC_CPTR
+
+; ==- Clean-Up
+ACALL   PUSH_CPTR
+ACALL   POP_DPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function moves the CPTR one cell to the left.
+;
+MOVE_LEFT:
+; ==- Prelude
+ACALL   PUSH_DPTR
+ACALL   POP_CPTR
+
+; ==- Decrement
+ACALL   DEC_CPTR
 
 ; ==- Clean-Up
 ACALL   PUSH_CPTR
