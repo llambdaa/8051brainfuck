@@ -4,6 +4,7 @@
 ; Memory Bank [0]:
 ; R7 (UH) + R6 (LH):    DPTR Backup (Volatile, Reserved)
 ; R5 (UH) + R4 (LH):    TPTR Backup (Volatile, Reserved)
+; R3 (UH) + R2 (LH):    Cell Pointer Backup (Volatile, Reserved)
 ; R1 (UH) + R0 (LH):    XSTACK Backup
 ;                       [During Parsing] (Volatile, Reserved)
 ;                       End Pointer of Code
@@ -20,7 +21,7 @@
 ; Note: Since the brainfuck code definition is described here, it
 ;       can be found in the code memory starting at location 0x0000.
 ;
-CODE:  DB '+[.[]]', 00h
+CODE:  DB '+++--', 00h
 
 
 ; ===================================================================
@@ -30,10 +31,10 @@ CODE:  DB '+[.[]]', 00h
 ; This function is the entry point to the program.
 ;
 MAIN:
-LCALL   USE_BANK0
-;LCALL   CLEAR_DATA_AREA
-LCALL   PARSE
-
+ACALL   USE_BANK0
+;ACALL   CLEAR_DATA_AREA
+ACALL   PARSE
+ACALL   INTERPRET
 
 ;---------------------------------------------------------------------
 ; This function is an endpoint that loops back to itself continuously
@@ -63,7 +64,7 @@ ERROR: SJMP ERROR
 ;
 PARSE:
 ; ==- Prelude
-LCALL   INIT_XSTACK
+ACALL   INIT_XSTACK
 MOV     DPTR, #0000h   
 
 _parse_next_symbol:
@@ -75,28 +76,28 @@ JNZ     _parse_process      ; Read symbol is null-terminator
 ; TODO: Check for unbalanced brackets
 MOV     R0, DPL             ; Backup terminator location from DPTR
 MOV     R1, DPH
-LCALL   FINISH
+RET
 
 ; ==- Process Symbol
 _parse_process:
-LCALL   IS_VALID_OPERATOR
+ACALL   IS_VALID_OPERATOR
 JB      F0, _parse_prepare  ; Valid symbol, ready for next
 
 _parse_opened_bracket:
 CJNE    A, #5Bh, _parse_closed_bracket  ; Check if symbol is opened bracket 
-LCALL   HANDLE_OPENED_BRACKET           ; Handle opened bracket
+ACALL   HANDLE_OPENED_BRACKET           ; Handle opened bracket
 SJMP    _parse_prepare                  ; Ready for next symbol
 
 _parse_closed_bracket:
 CJNE    A, #5Dh, _parse_invalid         ; Check if symbol is closed bracket
-LCALL   HANDLE_CLOSED_BRACKET           ; Handle closed bracket
+ACALL   HANDLE_CLOSED_BRACKET           ; Handle closed bracket
 SJMP    _parse_prepare                  ; Ready for next symbol
 
 _parse_invalid:
-LCALL   REPORT_INVALID_SYMBOL
+ACALL   REPORT_INVALID_SYMBOL
 
 _parse_prepare:
-LCALL   INC_DPTR            ; Point to next symbol
+ACALL   INC_DPTR            ; Point to next symbol
 SJMP    _parse_next_symbol
 
 
@@ -109,27 +110,27 @@ SJMP    _parse_next_symbol
 ;
 IS_VALID_OPERATOR:
 CLR     F0                  ; Output is false (symbol not validated)
-_is_plus:
-CJNE    A, #2Bh, _is_comma
+_v_is_plus:
+CJNE    A, #2Bh, _v_is_comma
 SJMP    _is_valid
 
-_is_comma:
-CJNE    A, #2Ch, _is_minus
+_v_is_comma:
+CJNE    A, #2Ch, _v_is_minus
 SJMP    _is_valid
 
-_is_minus:
-CJNE    A, #2Dh, _is_point
+_v_is_minus:
+CJNE    A, #2Dh, _v_is_point
 SJMP    _is_valid
 
-_is_point:
-CJNE    A, #2Eh, _is_left
+_v_is_point:
+CJNE    A, #2Eh, _v_is_left
 SJMP    _is_valid
 
-_is_left:
-CJNE    A, #3Ch, _is_right
+_v_is_left:
+CJNE    A, #3Ch, _v_is_right
 SJMP    _is_valid
 
-_is_right:
+_v_is_right:
 CJNE    A, #3Eh, _exit_validation
 
 _is_valid:
@@ -155,34 +156,34 @@ RET
 ;
 HANDLE_OPENED_BRACKET:
 ; ==- Prelude
-LCALL   PUSH_DPTR           ; Backup DPTR
-LCALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
+ACALL   PUSH_DPTR           ; Backup DPTR
+ACALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
 
 ; ==- Write Table Entry For Open Bracket
 MOV     A, R6               ; Push LH of backup DPTR
 MOVX    @DPTR, A               
-LCALL   INC_XSTACK          ; Move XSTACK pointer
+ACALL   INC_XSTACK          ; Move XSTACK pointer
 
 MOV     A, R7               ; Push UH of backup DPTR
 MOVX    @DPTR, A               
-LCALL   INC_XSTACK
+ACALL   INC_XSTACK
 
 MOV     A, R4               ; Push LH of TPTR
 MOVX    @DPTR, A
-LCALL   INC_XSTACK
+ACALL   INC_XSTACK
 
 MOV     A, R5               ; Push UH of TPTR
 MOVX    @DPTR, A
-LCALL   INC_XSTACK
+ACALL   INC_XSTACK
 
 ; ==- Move TPTR To End
-LCALL   PUSH_XSTACK         ; Backup XSTACK
-LCALL   POP_TPTR            ; Restore TPTR
-LCALL   TABLE_NEXT_ENTRY    ; Move TPTR by one entry
-LCALL   PUSH_TPTR           ; Backup TPTR
+ACALL   PUSH_XSTACK         ; Backup XSTACK
+ACALL   POP_TPTR            ; Restore TPTR
+ACALL   TABLE_NEXT_ENTRY    ; Move TPTR by one entry
+ACALL   PUSH_TPTR           ; Backup TPTR
 
 ; ==- Clean-Up
-LCALL POP_DPTR              ; Restore DPTR
+ACALL POP_DPTR              ; Restore DPTR
 RET
 
 
@@ -194,40 +195,40 @@ RET
 ;
 HANDLE_CLOSED_BRACKET:
 ; ==- Prelude
-LCALL   PUSH_DPTR           ; Backup DPTR
-LCALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
-LCALL   USE_BANK3           ; Select 1st memory bank
+ACALL   PUSH_DPTR           ; Backup DPTR
+ACALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
+ACALL   USE_BANK3           ; Select 1st memory bank
 
 ; ==- Read Topmost Entry
-LCALL   READ_TOPMOST_ENTRY
+ACALL   READ_TOPMOST_ENTRY
 
 ; ==- Prepare For Table Modification
-LCALL   PUSH_XSTACK         ; Backup XSTACK
-LCALL   POP_TPTR            ; Restore TPTR                
+ACALL   PUSH_XSTACK         ; Backup XSTACK
+ACALL   POP_TPTR            ; Restore TPTR                
 
-LCALL   USE_BANK3
+ACALL   USE_BANK3
 MOV     R6, DPL             ; Backup DPTR (currently pointing to start
 MOV     R7, DPH             ; of closed bracket entry before actually
                             ; writing it
 
 ; ==- Write Closed Bracket Table Entry
-LCALL   WRITE_CLOSED_BRACKET
+ACALL   WRITE_CLOSED_BRACKET
 
 ; ==- Prepare For Overwriting Opened Bracket Entry
-LCALL   PUSH_TPTR           ; Backup TPTR into 3rd memory bank
+ACALL   PUSH_TPTR           ; Backup TPTR into 3rd memory bank
 MOV     DPL, R2             ; Load TPTR of opened bracket 
 MOV     DPH, R3
 
 ; ==- Overwrite Entry Of Corresponding Opened Bracket
-LCALL   OVERWRITE_OPENED_BRACKET
+ACALL   OVERWRITE_OPENED_BRACKET
 
 ; ==- Move TPTR Back To End Of Table
-LCALL   POP_TPTR
+ACALL   POP_TPTR
 
 ; ==- Clean-Up
-LCALL   USE_BANK0           ; Select 0th memory bank
-LCALL   PUSH_TPTR           ; Backup TPTR (after writing entry)
-LCALL   POP_DPTR            ; Restore DPTR
+ACALL   USE_BANK0           ; Select 0th memory bank
+ACALL   PUSH_TPTR           ; Backup TPTR (after writing entry)
+ACALL   POP_DPTR            ; Restore DPTR
 RET
 
 
@@ -237,49 +238,27 @@ RET
 ;
 READ_TOPMOST_ENTRY:
 ; ==- Prelude
-LCALL   USE_BANK3           ; Select 3rd memory bank
+ACALL   USE_BANK3           ; Select 3rd memory bank
 
 ; ==- Read Entry
-LCALL   DEC_XSTACK          ; Shrink XSTACK
+ACALL   DEC_XSTACK          ; Shrink XSTACK
 MOVX    A, @DPTR            ; Load topmost value into A
 MOV     R3, A               ; Store topmost value
 
-LCALL   DEC_XSTACK
+ACALL   DEC_XSTACK
 MOVX    A, @DPTR   
 MOV     R2, A
 
-LCALL   DEC_XSTACK
+ACALL   DEC_XSTACK
 MOVX    A, @DPTR
 MOV     R1, A
 
-LCALL   DEC_XSTACK
+ACALL   DEC_XSTACK
 MOVX    A, @DPTR
 MOV     R0, A
 
 ; ==- Clean-Up
-LCALL   USE_BANK0
-RET
-
-
-;---------------------------------------------------------------------
-; This function writes an entry for the currently read closed bracket.
-;
-WRITE_CLOSED_BRACKET:
-MOV     A, R3               ; Load values read from stack in step
-MOVX    @DPTR, A            ; before into new table entry
-LCALL   INC_TPTR
-
-MOV     A, R2
-MOVX    @DPTR, A
-LCALL   INC_TPTR
-
-MOV     A, R1
-MOVX    @DPTR, A
-LCALL   INC_TPTR
-
-MOV     A, R0
-MOVX    @DPTR, A
-LCALL   INC_TPTR
+ACALL   USE_BANK0
 RET
 
 
@@ -290,132 +269,151 @@ RET
 OVERWRITE_OPENED_BRACKET:
 MOV     A, R7               ; Write backup TPTR of closed bracket entry
 MOVX    @DPTR, A            ; from 3rd memory bank
-LCALL   INC_TPTR
+ACALL   INC_TPTR
 
 MOV     A, R6               
 MOVX    @DPTR, A
-LCALL   INC_TPTR
+ACALL   INC_TPTR
 
-LCALL   USE_BANK0           ; Select 0th memory bank
+ACALL   USE_BANK0           ; Select 0th memory bank
 MOV     A, R7               ; Write DPTR containing current symbol index 
 MOVX    @DPTR, A            ; from 0th memory bank
-LCALL   INC_TPTR
+ACALL   INC_TPTR
 
 MOV     A, R6
 MOVX    @DPTR, A
 
-LCALL   USE_BANK3
+ACALL   USE_BANK3
+RET
+
+
+;---------------------------------------------------------------------
+; This function writes an entry for the currently read closed bracket.
+;
+WRITE_CLOSED_BRACKET:
+MOV     A, R3               ; Load values read from stack in step
+MOVX    @DPTR, A            ; before into new table entry
+ACALL   INC_TPTR
+
+MOV     A, R2
+MOVX    @DPTR, A
+ACALL   INC_TPTR
+
+MOV     A, R1
+MOVX    @DPTR, A
+ACALL   INC_TPTR
+
+MOV     A, R0
+MOVX    @DPTR, A
+ACALL   INC_TPTR
 RET
 
 
 ; ===================================================================
-; Table Pointer (TPTR) Handling
+; Interpretation
 ; ===================================================================
 ;---------------------------------------------------------------------
-; This function "pushes" TPTR by storing it into R5 (UH) and R4 (LH)
-; in order to avoid pushing onto the regular stack. Doing so makes it
-; difficult to retrieve the two TPTR bytes on top of the stack using
-; a function, as the return address is also pushed, burrying the
-; wanted data.
+; This function interprets the brainfuck code using the bracket table.
 ;
-PUSH_TPTR:
-MOV     R4, DPL
-MOV     R5, DPH
+INTERPRET:
+; ==- Prelude
+MOV     DPTR, #0000h        ; Reset DPTR
+ACALL   PUSH_TPTR           ; Backup TPTR to point to table start
+ACALL   INIT_CPTR           ; Reset CPTR
+
+_interp_next_symbol:
+MOV     A, #00h
+MOVC    A, @A+DPTR          ; Load symbol from code memory
+JNZ     _interp_symbol      ; Read symbol is null-terminator
+
+; ==- Interpretation Exit
+ACALL FINISH
+
+; ==- Interpret Symbol
+_interp_symbol:
+_i_is_plus:
+CJNE    A, #2Bh, _i_is_comma
+ACALL   INC_CELL
+JMP    _interp_prepare
+
+_i_is_comma:
+CJNE    A, #2Ch, _i_is_minus
+NOP
+SJMP    _interp_prepare
+
+_i_is_minus:
+CJNE    A, #2Dh, _i_is_point
+ACALL   DEC_CELL
+SJMP    _interp_prepare
+
+_i_is_point:
+CJNE    A, #2Eh, _i_is_left
+NOP
+SJMP    _interp_prepare
+
+_i_is_left:
+CJNE    A, #3Ch, _i_is_right
+NOP
+SJMP    _interp_prepare
+
+_i_is_right:
+CJNE    A, #3Eh, _i_is_opened_b
+NOP
+SJMP    _interp_prepare
+
+_i_is_opened_b:
+CJNE    A, #5Bh, _i_is_closed_b
+NOP
+SJMP    _interp_prepare
+
+_i_is_closed_b:
+CJNE    A, #5Dh, _interp_error
+NOP
+
+_interp_prepare:
+ACALL   INC_DPTR
+SJMP _interp_next_symbol
+
+_interp_error:
+LJMP    ERROR
+
+
+;---------------------------------------------------------------------
+; This function increments the cell the CPTR points onto.
+;
+INC_CELL:
+; ==- Prelude
+ACALL   PUSH_DPTR
+ACALL   POP_CPTR
+
+; ==- Increment
+MOVX    A, @DPTR                ; Load cell value into A
+INC     A                       ; Increment value
+MOVX    @DPTR, A                ; Load cell back to external memory
+
+; ==- Clean-Up
+ACALL   PUSH_CPTR
+ACALL   POP_DPTR
 RET
 
 
 ;---------------------------------------------------------------------
-; This function "pops" TPTR from R5 (UH) and R4 (LH). For further
-; explanation, see PUSH_TPTR above.
-; 
-POP_TPTR:
-MOV     DPL, R4
-MOV     DPH, R5
+; This function decrements the cell the CPTR points onto.
+;
+DEC_CELL:
+; ==- Prelude
+ACALL   PUSH_DPTR
+ACALL   POP_CPTR
+
+; ==- Decrement
+MOVX    A, @DPTR                ; Load cell value into A
+DEC     A                       ; Decrement value
+MOVX    @DPTR, A                ; Load cell back to external memory
+
+; ==- Clean-Up
+ACALL   PUSH_CPTR
+ACALL   POP_DPTR
 RET
-
-
-;---------------------------------------------------------------------
-; This function moves TPTR by four bytes, so that it points to the
-; next table entry.
-;
-TABLE_NEXT_ENTRY:
-LCALL   INC_DPTR
-LCALL   INC_DPTR
-LCALL   INC_DPTR
-LCALL   INC_DPTR
-RET
- 
-
-;---------------------------------------------------------------------
-; This function increments TPTR by one.
-; There is no decrement defined for 16-bit values. 
-;
-INC_TPTR:
-LCALL   INC_DPTR
-RET
-
-
-; ===================================================================
-; XSTACK Pointer Handling
-; ===================================================================
-;---------------------------------------------------------------------
-; This function initializes the XSTACK pointer to start at the end
-; of the external memory, so that it can grow downwards.
-;
-INIT_XSTACK:
-MOV     R0, #255d
-MOV     R1, #255d
-RET
-
-
-;---------------------------------------------------------------------
-; This function "pushes" XSTACK by storing it into R1 (UH) and R0 (LH)
-; in order to avoid pushing onto the regular stack. Doing so makes it
-; difficult to retrieve the two XSTACK bytes on top of the stack using
-; a function, as the return address is also pushed, burrying the
-; wanted data.
-;
-PUSH_XSTACK:
-MOV     R0, DPL
-MOV     R1, DPH
-RET
-
-
-;---------------------------------------------------------------------
-; This function "pops" XSTACK from R1 (UH) and R0 (LH). For further
-; explanation, see PUSH_XSTACK above.
-; 
-POP_XSTACK:
-MOV     DPL, R0
-MOV     DPH, R1
-ret
-
-
-;---------------------------------------------------------------------
-; This function "decrements" the XSTACK pointer. Actually, the DPTR
-; pointer register the XSTACK pointer is contained within while
-; working with it, is incremented. That is because, the XSTACK here
-; grows downwards, but it is intuitive and normally abstracted that
-; it does the opposite way.
-; 
-; Note: Destroys C(arry) Flag (begin and end)
-;
-DEC_XSTACK:
-LCALL   INC_DPTR            ; Incrementing the DPTR moves the XSTACK
-RET                         ; pointer closer to the stack's base,
-                            ; effectively shrinking it
-
-
-;---------------------------------------------------------------------
-; This function "increments" the XSTACK pointer. For further and
-; analogous explanation, see DEC_XSTACK above.
-; 
-; Note: Destroys C(arry) Flag (begin and end)
-;
-INC_XSTACK:
-LCALL   DEC_DPTR            ; Decrementing the DPTR moves the XSTACK
-RET                         ; pointer farther from the stack's base,
-                            ; effectively growing it
 
 
 ; ===================================================================
@@ -503,6 +501,174 @@ SJMP    _store_lower_dptr   ; Store lower half
 
 
 ; ===================================================================
+; Table Pointer (TPTR) Handling
+; ===================================================================
+;---------------------------------------------------------------------
+; This function "pushes" TPTR by storing it into R5 (UH) and R4 (LH)
+; in order to avoid pushing onto the regular stack. Doing so makes it
+; difficult to retrieve the two TPTR bytes on top of the stack using
+; a function, as the return address is also pushed, burrying the
+; wanted data.
+;
+PUSH_TPTR:
+MOV     R4, DPL
+MOV     R5, DPH
+RET
+
+
+;---------------------------------------------------------------------
+; This function "pops" TPTR from R5 (UH) and R4 (LH). For further
+; explanation, see PUSH_TPTR above.
+; 
+POP_TPTR:
+MOV     DPL, R4
+MOV     DPH, R5
+RET
+
+
+;---------------------------------------------------------------------
+; This function moves TPTR by four bytes, so that it points to the
+; next table entry.
+;
+TABLE_NEXT_ENTRY:
+ACALL   INC_DPTR
+ACALL   INC_DPTR
+ACALL   INC_DPTR
+ACALL   INC_DPTR
+RET
+ 
+
+;---------------------------------------------------------------------
+; This function increments TPTR by one.
+; There is no decrement defined for 16-bit values. 
+;
+INC_TPTR:
+ACALL   INC_DPTR
+RET
+
+
+; ===================================================================
+; Cell Pointer (CPTR) Handling
+; ===================================================================
+;---------------------------------------------------------------------
+; This function initializes the CPTR to start at the end of the
+; external memory, so that it can grow downwards.
+;
+INIT_CPTR:
+MOV     R2, #00h
+MOV     R3, #08h
+RET
+
+
+;---------------------------------------------------------------------
+; This function "pushes" CPTR by storing it into R3 (UH) and R2 (LH)
+; in order to avoid pushing onto the regular stack. Doing so makes it
+; difficult to retrieve the two CPTR bytes on top of the stack using
+; a function, as the return address is also pushed, burrying the
+; wanted data.
+;
+PUSH_CPTR:
+MOV     R2, DPL
+MOV     R3, DPH
+RET
+
+
+;---------------------------------------------------------------------
+; This function "pops" CPTR from R3 (UH) and R2 (LH). For further
+; explanation, see PUSH_CPTR above.
+; 
+POP_CPTR:
+MOV     DPL, R2
+MOV     DPH, R3
+RET
+ 
+
+;---------------------------------------------------------------------
+; This function increments TPTR by one.
+; There is no increment defined for 16-bit values. 
+;
+; TODO: Wrap around when CPTR is 255
+;
+INC_CPTR:
+ACALL   INC_DPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function decrements TPTR by one.
+; There is no decrement defined for 16-bit values. 
+;
+; TODO: Wrap around when CPTR is 0
+;
+DEC_CPTR:
+ACALL   DEC_DPTR
+RET
+
+
+; ===================================================================
+; XSTACK Pointer Handling
+; ===================================================================
+;---------------------------------------------------------------------
+; This function initializes the XSTACK pointer to start at the end
+; of the external memory, so that it can grow downwards.
+;
+INIT_XSTACK:
+MOV     R0, #255d
+MOV     R1, #255d
+RET
+
+
+;---------------------------------------------------------------------
+; This function "pushes" XSTACK by storing it into R1 (UH) and R0 (LH)
+; in order to avoid pushing onto the regular stack. Doing so makes it
+; difficult to retrieve the two XSTACK bytes on top of the stack using
+; a function, as the return address is also pushed, burrying the
+; wanted data.
+;
+PUSH_XSTACK:
+MOV     R0, DPL
+MOV     R1, DPH
+RET
+
+
+;---------------------------------------------------------------------
+; This function "pops" XSTACK from R1 (UH) and R0 (LH). For further
+; explanation, see PUSH_XSTACK above.
+; 
+POP_XSTACK:
+MOV     DPL, R0
+MOV     DPH, R1
+ret
+
+
+;---------------------------------------------------------------------
+; This function "decrements" the XSTACK pointer. Actually, the DPTR
+; pointer register the XSTACK pointer is contained within while
+; working with it, is incremented. That is because, the XSTACK here
+; grows downwards, but it is intuitive and normally abstracted that
+; it does the opposite way.
+; 
+; Note: Destroys C(arry) Flag (begin and end)
+;
+DEC_XSTACK:
+ACALL   INC_DPTR            ; Incrementing the DPTR moves the XSTACK
+RET                         ; pointer closer to the stack's base,
+                            ; effectively shrinking it
+
+
+;---------------------------------------------------------------------
+; This function "increments" the XSTACK pointer. For further and
+; analogous explanation, see DEC_XSTACK above.
+; 
+; Note: Destroys C(arry) Flag (begin and end)
+;
+INC_XSTACK:
+ACALL   DEC_DPTR            ; Decrementing the DPTR moves the XSTACK
+RET                         ; pointer farther from the stack's base,
+                            ; effectively growing it
+
+
+; ===================================================================
 ; Data Area Clear
 ; ===================================================================
 ;---------------------------------------------------------------------
@@ -518,10 +684,10 @@ _clear_next_byte:
 MOV     A, #00h             ; Zero out target byte
 MOVX    @DPTR, A
 
-LCALL   OR_DPTR             ; Or both bytes of DPTR and exit
+ACALL   OR_DPTR             ; Or both bytes of DPTR and exit
 JZ      _exit_clear         ; if DPTR has reached zero
 
-LCALL   DEC_DPTR
+ACALL   DEC_DPTR
 SJMP    _clear_next_byte
 
 _exit_clear:
@@ -556,7 +722,7 @@ RET
 ; 
 REPORT_INVALID_SYMBOL:
 ; TODO: Report invalid symbol in some manner
-LCALL   ERROR
+ACALL   ERROR
 
 
 ;---------------------------------------------------------------------
@@ -564,7 +730,7 @@ LCALL   ERROR
 ;
 REPORT_UNBALANCED_BRACKET:
 ; TODO: Report unbalanced bracket in some way
-LCALL   ERROR
+ACALL   ERROR
 
 
 ;---------------------------------------------------------------------
@@ -572,4 +738,4 @@ LCALL   ERROR
 ;
 REPORT_TOO_MANY_BRACKETS:
 ; TODO: Report too many brackets in some way
-LCALL   ERROR
+ACALL   ERROR
