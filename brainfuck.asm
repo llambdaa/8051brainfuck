@@ -18,20 +18,18 @@
 ; Note: Since the brainfuck code definition is described here, it
 ;       can be found in the code memory starting at location 0x0000.
 ;
-CODE:  DB '+[+]-', 00h
+CODE:  DB ']', 00h
 
 
 ; ===================================================================
 ; Flow Handling
 ; ===================================================================
 ;---------------------------------------------------------------------
-; This function is the entry point to the program.
+; This function is the entry point to the program.C
 ;
 MAIN:
-ACALL DELAY
-
 ACALL   USE_BANK0
-;ACALL   CLEAR_DATA_AREA
+ACALL   CLEAR_DATA_AREA
 ACALL   PARSE
 ACALL   INTERPRET
 
@@ -72,8 +70,12 @@ MOVC    A, @A+DPTR          ; Load symbol from code memory
 JNZ     _parse_process      ; Read symbol is null-terminator
 
 ; ==- Parsing Exit
-; TODO: Check for unbalanced brackets
-RET
+CJNE    R0, #0FFh, _parse_unbalanced_bracket    ; Check if XSTACK is empty
+CJNE    R1, #0FFh, _parse_unbalanced_bracket    ; Otherwise, an opened bracket  
+RET                                             ; is not balanced
+
+_parse_unbalanced_bracket:
+ACALL   REPORT_UNBALANCED_BRACKET
 
 ; ==- Process Symbol
 _parse_process:
@@ -86,11 +88,11 @@ ACALL   HANDLE_OPENED_BRACKET           ; Handle opened bracket
 SJMP    _parse_prepare                  ; Ready for next symbol
 
 _parse_closed_bracket:
-CJNE    A, #5Dh, _parse_invalid         ; Check if symbol is closed bracket
+CJNE    A, #5Dh, _parse_invalid_symbol  ; Check if symbol is closed bracket
 ACALL   HANDLE_CLOSED_BRACKET           ; Handle closed bracket
 SJMP    _parse_prepare                  ; Ready for next symbol
 
-_parse_invalid:
+_parse_invalid_symbol:
 ACALL   REPORT_INVALID_SYMBOL
 
 _parse_prepare:
@@ -152,6 +154,12 @@ RET
 ; START                                           XSTACK TOP POINTER
 ;
 HANDLE_OPENED_BRACKET:
+; ==- Check Bracket Count
+CJNE    R5, #08h, _handle_ob        ; Only need to check UH of TPTR
+ACALL   REPORT_TOO_MANY_BRACKETS    ; If it went past #0800, then the
+                                    ; bracket table is full
+
+_handle_ob:
 ; ==- Prelude
 ACALL   PUSH_DPTR           ; Backup DPTR
 ACALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
@@ -198,6 +206,12 @@ RET
 ; the open bracket is modified to point to the closed bracket.
 ;
 HANDLE_CLOSED_BRACKET:
+; ==- Check Stack Size
+CJNE    R0, #0FFh, _handle_cb     ; Check if XSTACK is empty
+CJNE    R1, #0FFh, _handle_cb     ; If it is, the closing bracket is
+ACALL   REPORT_UNBALANCED_BRACKET ; not balanced
+
+_handle_cb:
 ; ==- Prelude
 ACALL   PUSH_DPTR           ; Backup DPTR
 ACALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
@@ -374,7 +388,7 @@ CJNE    A, #2Ch, _interp_error
 NOP
 
 _interp_prepare:
-ACALL   INC_DPTR                ; Increment symbol pointer
+ACALL   INC_DPTR            ; Increment symbol pointer
 SJMP _interp_next_symbol
 
 _interp_error:
@@ -390,9 +404,9 @@ ACALL   PUSH_DPTR
 ACALL   POP_CPTR
 
 ; ==- Increment
-MOVX    A, @DPTR                ; Load cell value into A
-INC     A                       ; Increment value
-MOVX    @DPTR, A                ; Load cell back to external memory
+MOVX    A, @DPTR            ; Load cell value into A
+INC     A                   ; Increment value
+MOVX    @DPTR, A            ; Load cell back to external memory
 
 ; ==- Clean-Up
 ACALL   PUSH_CPTR
@@ -409,9 +423,9 @@ ACALL   PUSH_DPTR
 ACALL   POP_CPTR
 
 ; ==- Decrement
-MOVX    A, @DPTR                ; Load cell value into A
-DEC     A                       ; Decrement value
-MOVX    @DPTR, A                ; Load cell back to external memory
+MOVX    A, @DPTR            ; Load cell value into A
+DEC     A                   ; Decrement value
+MOVX    @DPTR, A            ; Load cell back to external memory
 
 ; ==- Clean-Up
 ACALL   PUSH_CPTR
@@ -428,9 +442,16 @@ ACALL   PUSH_DPTR
 ACALL   POP_CPTR
 
 ; ==- Increment
+MOV     A, DPL
+CJNE    A, #0FFh, _move_right ; Check if cell is last cell
+MOV     DPTR, #0800h          ; If it is, go back to start of cells
+SJMP    _move_right_exit
+
+_move_right:
 ACALL   INC_CPTR
 
 ; ==- Clean-Up
+_move_right_exit:
 ACALL   PUSH_CPTR
 ACALL   POP_DPTR
 RET
@@ -445,9 +466,16 @@ ACALL   PUSH_DPTR
 ACALL   POP_CPTR
 
 ; ==- Decrement
+MOV     A, DPL
+CJNE    A, #00h, _move_left ; Check if cell is first cell
+MOV     DPTR, #08FFh        ; If it is, go back to end of cells
+SJMP    _move_left_exit
+
+_move_left:
 ACALL   DEC_CPTR
 
 ; ==- Clean-Up
+_move_left_exit:
 ACALL   PUSH_CPTR
 ACALL   POP_DPTR
 RET
@@ -793,10 +821,32 @@ RET                         ; pointer farther from the stack's base,
 ; LCD Control
 ; ===================================================================
 ;---------------------------------------------------------------------
+; This function initializes the LCD.
+;
+LCD_INIT:
+MOV     A, #38h             ; Set char dimensions
+ACALL   LCD_COMMAND
+
+MOV     A, #0Eh             ; Display on, Cursor on, Blinking off
+ACALL   LCD_COMMAND
+
+MOV     A, #06h             ; Auto-increment cursor
+ACALl   LCD_COMMAND
+RET
+
+;---------------------------------------------------------------------
+; This function clears the LCD.
+;
+LCD_CLEAR:
+MOV     A, #01h
+ACALL   LCD_COMMAND
+ret
+
+;---------------------------------------------------------------------
 ; This function sends data to the LCD stored in register A.
 ;
 LCD_SEND:
-MOV     P1, A               ; Put content of A onto port
+MOV     P2, A               ; Put content of A onto port
 SETB    P3.3                ; High -> Low pulse to latch the data (E)
 CLR     P3.3
 ACALL   DELAY               ; Wait for the LCD
