@@ -218,8 +218,8 @@ ACALL   WRITE_CLOSED_BRACKET
 
 ; ==- Prepare For Overwriting Opened Bracket Entry
 ACALL   PUSH_TPTR           ; Backup TPTR into 3rd memory bank
-MOV     DPL, R2             ; Load TPTR of opened bracket 
-MOV     DPH, R3
+MOV     DPL, R0             ; Load TPTR of opened bracket 
+MOV     DPH, R1
 
 ; ==- Overwrite Entry Of Corresponding Opened Bracket
 ACALL   OVERWRITE_OPENED_BRACKET
