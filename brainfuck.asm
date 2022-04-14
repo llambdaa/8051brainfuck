@@ -2,9 +2,9 @@
 ; Register Table:
 ; ~~~~~~~~~~~~~~~~
 ; Memory Bank [0]:
-; R7 (UH) + R6 (LH):    DPTR Backup (Volatile, Reserved)
+; R7 (UH) + R6 (LH):    DPTR Backup [Symbol Pointer] (Volatile, Reserved)
 ; R5 (UH) + R4 (LH):    TPTR Backup (Volatile, Reserved)
-; R3 (UH) + R2 (LH):    Cell Pointer Backup (Volatile, Reserved)
+; R3 (UH) + R2 (LH):    Cell Pointer (CPTR) Backup (Volatile, Reserved)
 ; R1 (UH) + R0 (LH):    XSTACK Backup
 ;                       [During Parsing] (Volatile, Reserved)
 ;                       End Pointer of Code
@@ -13,15 +13,15 @@
 ; Memory Bank [3]:
 ; R7 (UH) + R6 (LH):    TPTR Before Close Bracket Entry
 ; R5 (UH) + R4 (LH):    TPTR After Close Bracket Entry
-; R3 (UH) + R2 (LH):    TPTR Of Open Bracket
-; R1 (UH) + R0 (LH):    Symbol Pointer
+; R3 (UH) + R2 (LH):    Symbol Pointer
+; R1 (UH) + R0 (LH):    TPTR Of Open Bracket
 ; ===================================================================
 ; Brainfuck Code with Newline Terminator
 ; ===================================================================
 ; Note: Since the brainfuck code definition is described here, it
 ;       can be found in the code memory starting at location 0x0000.
 ;
-CODE:  DB '+>+>-<<+', 00h
+CODE:  DB '[]+', 00h
 
 
 ; ===================================================================
@@ -74,8 +74,6 @@ JNZ     _parse_process      ; Read symbol is null-terminator
 
 ; ==- Parsing Exit
 ; TODO: Check for unbalanced brackets
-MOV     R0, DPL             ; Backup terminator location from DPTR
-MOV     R1, DPH
 RET
 
 ; ==- Process Symbol
@@ -111,27 +109,27 @@ SJMP    _parse_next_symbol
 IS_VALID_OPERATOR:
 CLR     F0                  ; Output is false (symbol not validated)
 _v_is_plus:
-CJNE    A, #2Bh, _v_is_comma
-SJMP    _is_valid
-
-_v_is_comma:
-CJNE    A, #2Ch, _v_is_minus
+CJNE    A, #2Bh, _v_is_minus
 SJMP    _is_valid
 
 _v_is_minus:
-CJNE    A, #2Dh, _v_is_point
-SJMP    _is_valid
-
-_v_is_point:
-CJNE    A, #2Eh, _v_is_left
-SJMP    _is_valid
-
-_v_is_left:
-CJNE    A, #3Ch, _v_is_right
+CJNE    A, #2Dh, _v_is_right
 SJMP    _is_valid
 
 _v_is_right:
-CJNE    A, #3Eh, _exit_validation
+CJNE    A, #3Eh, _v_is_left
+SJMP    _is_valid
+
+_v_is_left:
+CJNE    A, #3Ch, _v_is_point
+SJMP    _is_valid
+
+_v_is_point:
+CJNE    A, #2Eh, _v_is_comma
+SJMP    _is_valid
+
+_v_is_comma:
+CJNE    A, #2Ch, _exit_validation
 
 _is_valid:
 SETB    F0                  ; Output is true (symbol validated)
@@ -149,7 +147,7 @@ RET
 ; pointer (R5 and R4):
 ;
 ;   +--------+--------+--------+--------+--------+--------+
-;   |  BASE  |  ...   |  DPL   |  DPH   |   R4   |   R5   |
+;   |  BASE  |  ...   |   R4   |   R5   |  DPL   |  DPH   |
 ;   +--------+--------+--------+--------+--------+--------+
 ;   ^                                                     ^  
 ; START                                           XSTACK TOP POINTER
@@ -159,22 +157,8 @@ HANDLE_OPENED_BRACKET:
 ACALL   PUSH_DPTR           ; Backup DPTR
 ACALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
 
-; ==- Write Table Entry For Open Bracket
-MOV     A, R6               ; Push LH of backup DPTR
-MOVX    @DPTR, A               
-ACALL   INC_XSTACK          ; Move XSTACK pointer
-
-MOV     A, R7               ; Push UH of backup DPTR
-MOVX    @DPTR, A               
-ACALL   INC_XSTACK
-
-MOV     A, R4               ; Push LH of TPTR
-MOVX    @DPTR, A
-ACALL   INC_XSTACK
-
-MOV     A, R5               ; Push UH of TPTR
-MOVX    @DPTR, A
-ACALL   INC_XSTACK
+; ==- Write Opened Bracket Table Entry
+ACALL   WRITE_OPENED_BRACKET
 
 ; ==- Move TPTR To End
 ACALL   PUSH_XSTACK         ; Backup XSTACK
@@ -183,9 +167,30 @@ ACALL   TABLE_NEXT_ENTRY    ; Move TPTR by one entry
 ACALL   PUSH_TPTR           ; Backup TPTR
 
 ; ==- Clean-Up
-ACALL POP_DPTR              ; Restore DPTR
+ACALL   POP_DPTR            ; Restore DPTR
 RET
 
+
+;---------------------------------------------------------------------
+; This function writes an entry for the currently read opened bracket.
+;
+WRITE_OPENED_BRACKET:
+MOV     A, R4               ; Push LH of TPTR
+MOVX    @DPTR, A
+ACALL   INC_XSTACK
+
+MOV     A, R5               ; Push UH of TPTR
+MOVX    @DPTR, A
+ACALL   INC_XSTACK
+
+MOV     A, R6               ; Push LH of backup DPTR
+MOVX    @DPTR, A               
+ACALL   INC_XSTACK          ; Move XSTACK pointer
+
+MOV     A, R7               ; Push UH of backup DPTR
+MOVX    @DPTR, A               
+ACALL   INC_XSTACK
+RET
 
 ;---------------------------------------------------------------------
 ; This function "pops" the corresponding bracket from the XSTACK into
@@ -267,14 +272,6 @@ RET
 ; bracket.
 ;
 OVERWRITE_OPENED_BRACKET:
-MOV     A, R7               ; Write backup TPTR of closed bracket entry
-MOVX    @DPTR, A            ; from 3rd memory bank
-ACALL   INC_TPTR
-
-MOV     A, R6               
-MOVX    @DPTR, A
-ACALL   INC_TPTR
-
 ACALL   USE_BANK0           ; Select 0th memory bank
 MOV     A, R7               ; Write DPTR containing current symbol index 
 MOVX    @DPTR, A            ; from 0th memory bank
@@ -282,8 +279,15 @@ ACALL   INC_TPTR
 
 MOV     A, R6
 MOVX    @DPTR, A
+ACALL   INC_TPTR
 
-ACALL   USE_BANK3
+ACALL   USE_BANK3           ; Select 3rd memory bank
+MOV     A, R7               ; Write backup TPTR of closed bracket entry
+MOVX    @DPTR, A            ; from 3rd memory bank
+ACALL   INC_TPTR
+
+MOV     A, R6               
+MOVX    @DPTR, A
 RET
 
 
@@ -332,46 +336,46 @@ ACALL FINISH
 ; ==- Interpret Symbol
 _interp_symbol:
 _i_is_plus:
-CJNE    A, #2Bh, _i_is_comma
+CJNE    A, #2Bh, _i_is_minus
 ACALL   INC_CELL
 JMP    _interp_prepare
 
-_i_is_comma:
-CJNE    A, #2Ch, _i_is_minus
-NOP
-SJMP    _interp_prepare
-
 _i_is_minus:
-CJNE    A, #2Dh, _i_is_point
+CJNE    A, #2Dh, _i_is_right
 ACALL   DEC_CELL
 SJMP    _interp_prepare
 
-_i_is_point:
-CJNE    A, #2Eh, _i_is_left
-NOP
+_i_is_right:
+CJNE    A, #3Eh, _i_is_left
+ACALL   MOVE_RIGHT
 SJMP    _interp_prepare
 
 _i_is_left:
-CJNE    A, #3Ch, _i_is_right
+CJNE    A, #3Ch, _i_is_opened_b
 ACALL   MOVE_LEFT
-SJMP    _interp_prepare
-
-_i_is_right:
-CJNE    A, #3Eh, _i_is_opened_b
-ACALL   MOVE_RIGHT
 SJMP    _interp_prepare
 
 _i_is_opened_b:
 CJNE    A, #5Bh, _i_is_closed_b
-NOP
+ACALL   INTERP_OPENED_BRACKET
 SJMP    _interp_prepare
 
 _i_is_closed_b:
-CJNE    A, #5Dh, _interp_error
+CJNE    A, #5Dh, _i_is_point
+ACALL   INTERP_CLOSED_BRACKET
+SJMP    _interp_prepare
+
+_i_is_point:
+CJNE    A, #2Eh, _i_is_comma
+NOP
+SJMP    _interp_prepare
+
+_i_is_comma:
+CJNE    A, #2Ch, _interp_error
 NOP
 
 _interp_prepare:
-ACALL   INC_DPTR
+ACALL   INC_DPTR                ; Increment symbol pointer
 SJMP _interp_next_symbol
 
 _interp_error:
@@ -447,6 +451,66 @@ ACALL   DEC_CPTR
 ; ==- Clean-Up
 ACALL   PUSH_CPTR
 ACALL   POP_DPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function interprets the current opened bracket. If the cell's
+; value is zero, it jumps behind the matching closing bracket
+INTERP_OPENED_BRACKET:
+; ==- Prelude
+ACALL   PUSH_DPTR               ; Backup DPTR
+ACALL   POP_CPTR                ; Load CPTR for loading the cell value
+
+; ==- Decide Action
+MOVX    A, @DPTR                ; Load cell value into A
+CJNE    A, #00h, _iob_skip      ; Check if A is zero - if not, then
+                                ; skip the bracket in the table to be
+                                ; ready to read the next one)
+
+; ==- Load Table Entry
+ACALL   POP_TPTR                ; Load TPTR for reading table
+ACALL   READ_TABLE_ENTRY        ; Load entry (symbol pointer is set
+                                ; directly when reading; table pointer
+                                ; is in TPTR backup)
+
+_iob_skip:
+ACALL   POP_TPTR                ; Load TPTR for skipping to next entry
+ACALL   TABLE_NEXT_ENTRY        ; Skip to next entry 
+
+; ==- Clean-Up
+_iob_exit:
+ACALL   PUSH_TPTR               ; Backup TPTR
+ACALL   POP_DPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function read the table entry starting at TPTR.
+;
+READ_TABLE_ENTRY:
+MOVX    A, @DPTR                ; Load UH of entry's symbol pointer
+MOV     R7, A               
+ACALL   INC_TPTR                
+
+MOVX    A, @DPTR               ; Load LH of entry's symbol pointer
+MOV     R6, A
+ACALL   INC_TPTR
+
+MOVX    A, @DPTR               ; Load UH of entry's table pointer
+MOV     R5, A
+ACALL   INC_TPTR
+
+MOVX    A, @DPTR               ; Load LH of entry's table pointer
+MOV     R4, A
+RET
+
+
+;---------------------------------------------------------------------
+; This function interprets the close closed bracket. If the cell's
+; value is not zero, it jumps back to the matching opened bracket.
+INTERP_CLOSED_BRACKET:
+; ==- Prelude
 RET
 
 
@@ -647,8 +711,8 @@ RET
 ; of the external memory, so that it can grow downwards.
 ;
 INIT_XSTACK:
-MOV     R0, #255d
-MOV     R1, #255d
+MOV     R0, #0FFh
+MOV     R1, #0FFh
 RET
 
 
