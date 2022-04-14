@@ -2,13 +2,10 @@
 ; Register Table:
 ; ~~~~~~~~~~~~~~~~
 ; Memory Bank [0]:
-; R7 (UH) + R6 (LH):    DPTR Backup [Symbol Pointer] (Volatile, Reserved)
-; R5 (UH) + R4 (LH):    TPTR Backup (Volatile, Reserved)
-; R3 (UH) + R2 (LH):    Cell Pointer (CPTR) Backup (Volatile, Reserved)
+; R7 (UH) + R6 (LH):    DPTR Backup (Symbol Pointer)
+; R5 (UH) + R4 (LH):    TPTR Backup
+; R3 (UH) + R2 (LH):    Cell Pointer (CPTR) Backup
 ; R1 (UH) + R0 (LH):    XSTACK Backup
-;                       [During Parsing] (Volatile, Reserved)
-;                       End Pointer of Code
-;                       [After Parsing] (Permanent, Reserved)    
 ; 
 ; Memory Bank [3]:
 ; R7 (UH) + R6 (LH):    TPTR Before Close Bracket Entry
@@ -21,7 +18,7 @@
 ; Note: Since the brainfuck code definition is described here, it
 ;       can be found in the code memory starting at location 0x0000.
 ;
-CODE:  DB '[]+', 00h
+CODE:  DB '+[+]-', 00h
 
 
 ; ===================================================================
@@ -466,13 +463,13 @@ ACALL   POP_CPTR                ; Load CPTR for loading the cell value
 MOVX    A, @DPTR                ; Load cell value into A
 CJNE    A, #00h, _iob_skip      ; Check if A is zero - if not, then
                                 ; skip the bracket in the table to be
-                                ; ready to read the next one)
+                                ; ready to read the next one
 
 ; ==- Load Table Entry
 ACALL   POP_TPTR                ; Load TPTR for reading table
 ACALL   READ_TABLE_ENTRY        ; Load entry (symbol pointer is set
                                 ; directly when reading; table pointer
-                                ; is in TPTR backup)
+                                ; is also backuped)
 
 _iob_skip:
 ACALL   POP_TPTR                ; Load TPTR for skipping to next entry
@@ -489,7 +486,7 @@ RET
 ; This function read the table entry starting at TPTR.
 ;
 READ_TABLE_ENTRY:
-MOVX    A, @DPTR                ; Load UH of entry's symbol pointer
+MOVX    A, @DPTR               ; Load UH of entry's symbol pointer
 MOV     R7, A               
 ACALL   INC_TPTR                
 
@@ -511,6 +508,30 @@ RET
 ; value is not zero, it jumps back to the matching opened bracket.
 INTERP_CLOSED_BRACKET:
 ; ==- Prelude
+ACALL   PUSH_DPTR               ; Backup DPTR
+ACALL   POP_CPTR                ; Load CPTR for loading the cell value
+
+; ==- Decide Action
+MOVX    A, @DPTR                ; Load cell value into A
+CJNE    A, #00h, _icb_back      ; Check if A is zero - if not, then
+                                ; skip the bracket in the table to be
+                                ; ready to read the next one)
+
+; ==- Skip Bracket
+ACALL   POP_TPTR                ; Load TPTR for skipping to next entry
+ACALL   TABLE_NEXT_ENTRY        ; Skip to next entry 
+ACALL   PUSH_TPTR
+ACALL   POP_DPTR
+RET
+
+; ==- Jump Back To Opened Bracket
+_icb_back:
+ACALL   POP_TPTR                ; Load TPTR for reading table
+ACALL   READ_TABLE_ENTRY        ; Load entry (symbol pointer is set
+                                ; directly when reading; table pointer
+                                ; is also backuped)
+ACALL   POP_DPTR                ; Restore DPTR
+ACALL   DEC_DPTR                ; Move behind bracket
 RET
 
 
