@@ -28,6 +28,8 @@ CODE:  DB '+[+]-', 00h
 ; This function is the entry point to the program.
 ;
 MAIN:
+ACALL DELAY
+
 ACALL   USE_BANK0
 ;ACALL   CLEAR_DATA_AREA
 ACALL   PARSE
@@ -786,6 +788,52 @@ ACALL   DEC_DPTR            ; Decrementing the DPTR moves the XSTACK
 RET                         ; pointer farther from the stack's base,
                             ; effectively growing it
 
+
+; ===================================================================
+; LCD Control
+; ===================================================================
+;---------------------------------------------------------------------
+; This function sends data to the LCD stored in register A.
+;
+LCD_SEND:
+MOV     P1, A               ; Put content of A onto port
+SETB    P3.3                ; High -> Low pulse to latch the data (E)
+CLR     P3.3
+ACALL   DELAY               ; Wait for the LCD
+RET
+
+;---------------------------------------------------------------------
+; This function sends a command to the LCD stored in register A.
+;
+LCD_COMMAND:
+CLR     P3.4                ; Data is command (RS)
+ACALL   LCD_SEND             
+ret
+
+
+;---------------------------------------------------------------------
+; This function shows the character stored in register A.
+; 
+LCD_SHOW:
+SETB    P3.4                ; Data is character (RS)
+ACALL   LCD_SEND
+RET
+
+
+;---------------------------------------------------------------------
+; This function delays execution by triggering a timer delay.
+;
+DELAY:
+MOV     TMOD, #01h          ; Sets timer mode
+MOV     TH0, #0FCh           ; Set timer reference counter
+MOV     TL0, #17h             
+SETB    TR0                 ; Starts timer
+
+_delay_jmp:
+JNB     TF0, _delay_jmp     ; Execution stuck here until timer finished
+CLR     TR0                 ; Stop timer
+CLR     TF0                 ; Reset timer flag
+RET
 
 ; ===================================================================
 ; Data Area Clear
