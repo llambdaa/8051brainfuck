@@ -20,18 +20,30 @@
 ;
 CODE:  DB ']', 00h
 
+; ===================================================================
+; Constant Port Definitions
+; ===================================================================
+RS      EQU P0.0
+RW      EQU P0.1
+EN      EQU P0.2
+PD      EQU P2
 
 ; ===================================================================
-; Flow Handling
+; Flow Handling 
 ; ===================================================================
 ;---------------------------------------------------------------------
 ; This function is the entry point to the program.C
 ;
 MAIN:
-ACALL   USE_BANK0
-ACALL   CLEAR_DATA_AREA
-ACALL   PARSE
-ACALL   INTERPRET
+ACALL   LCD_INIT
+
+MOV     A, #'A'
+ACALL   LCD_DATA
+
+; ACALL   USE_BANK0
+; ACALL   CLEAR_DATA_AREA
+; ACALL   PARSE
+;ACALL   INTERPRET
 
 ;---------------------------------------------------------------------
 ; This function is an endpoint that loops back to itself continuously
@@ -824,65 +836,61 @@ RET                         ; pointer farther from the stack's base,
 ; This function initializes the LCD.
 ;
 LCD_INIT:
-MOV     A, #38h             ; Set char dimensions
-ACALL   LCD_COMMAND
-
-MOV     A, #0Eh             ; Display on, Cursor on, Blinking off
+MOV     A, #0Eh             ; Display on, Cursor on
 ACALL   LCD_COMMAND
 
 MOV     A, #06h             ; Auto-increment cursor
-ACALl   LCD_COMMAND
+ACALL   LCD_COMMAND
+
+MOV     A, #38h             ; Set char dimensions
+ACALL   LCD_COMMAND
+
+MOV     A, #80h             ; Set cursor to start of first line
+ACALL   LCD_COMMAND
 RET
 
 ;---------------------------------------------------------------------
-; This function clears the LCD.
-;
-LCD_CLEAR:
-MOV     A, #01h
-ACALL   LCD_COMMAND
-ret
-
-;---------------------------------------------------------------------
-; This function sends data to the LCD stored in register A.
+; This function sends the data in A with the modes described by RS and
+; RW to tbe display and waits until the controller is no longer busy.
 ;
 LCD_SEND:
-MOV     P2, A               ; Put content of A onto port
-SETB    P3.3                ; High -> Low pulse to latch the data (E)
-CLR     P3.3
-ACALL   DELAY               ; Wait for the LCD
+SETB    EN
+CLR     EN
+ACALL   DELAY
 RET
 
 ;---------------------------------------------------------------------
 ; This function sends a command to the LCD stored in register A.
 ;
 LCD_COMMAND:
-CLR     P3.4                ; Data is command (RS)
-ACALL   LCD_SEND             
-ret
-
+MOV     PD, A               ; Load data to port
+CLR     RS                  ; Set COMMAND mode
+CLR     RW                  ; Set WRITE mode
+ACALL   LCD_SEND
+RET
 
 ;---------------------------------------------------------------------
 ; This function shows the character stored in register A.
 ; 
-LCD_SHOW:
-SETB    P3.4                ; Data is character (RS)
+LCD_DATA:
+MOV     PD, A               ; Load data to port
+SETB    RS                  ; Set DATA mode
+CLR     RW                  ; Set WRITE mode
 ACALL   LCD_SEND
 RET
 
-
 ;---------------------------------------------------------------------
-; This function delays execution by triggering a timer delay.
+; This function delays execution until the display controller says,
+; that it is no longer busy (using Busy Flag).
 ;
 DELAY:
-MOV     TMOD, #01h          ; Sets timer mode
-MOV     TH0, #0FCh           ; Set timer reference counter
-MOV     TL0, #17h             
-SETB    TR0                 ; Starts timer
-
-_delay_jmp:
-JNB     TF0, _delay_jmp     ; Execution stuck here until timer finished
-CLR     TR0                 ; Stop timer
-CLR     TF0                 ; Reset timer flag
+CLR     RS
+SETB    RW                  
+SETB	PD.7                ; Declare as input for busy flag poll
+_delay_check:
+SETB    EN                  ; Latch the data
+CLR     EN
+JB      PD.7, _delay_check  ; Check again, if busy flag still set
 RET
 
 ; ===================================================================
