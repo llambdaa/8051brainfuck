@@ -12,13 +12,25 @@
 ; R5 (UH) + R4 (LH):    TPTR After Close Bracket Entry
 ; R3 (UH) + R2 (LH):    Symbol Pointer
 ; R1 (UH) + R0 (LH):    TPTR Of Open Bracket
+;
+;
 ; ===================================================================
 ; Brainfuck Code with Newline Terminator
 ; ===================================================================
-; Note: Since the brainfuck code definition is described here, it
-;       can be found in the code memory starting at location 0x0000.
-;
-CODE:  DB ']', 00h
+ORG 0300h
+DSTART  EQU 0300h
+
+CODE:  DB '?', 00h
+
+
+; ===================================================================
+; Error Message Definitions
+; ===================================================================
+INVALID_SYMBOL:     DB 'Invalid symbol ', 00h
+UNBALANCED_BRACKET: DB 'Unbalanced bracket ', 00h
+TOO_MANY_BRACKETS:  DB 'Too many brackets ', 00h
+AT_INDEX:           DB 'at index ', 00h
+
 
 ; ===================================================================
 ; Constant Port Definitions
@@ -28,22 +40,22 @@ RW      EQU P0.1
 EN      EQU P0.2
 PD      EQU P2
 
+
 ; ===================================================================
 ; Flow Handling 
 ; ===================================================================
 ;---------------------------------------------------------------------
-; This function is the entry point to the program.C
+; This function is the entry point to the program.
 ;
+ORG 0000h
 MAIN:
 ACALL   LCD_INIT
 
-MOV     A, #'A'
-ACALL   LCD_DATA
-
-; ACALL   USE_BANK0
+ACALL   USE_BANK0
 ; ACALL   CLEAR_DATA_AREA
-; ACALL   PARSE
-;ACALL   INTERPRET
+ACALL   PARSE
+ACALL   INTERPRET
+
 
 ;---------------------------------------------------------------------
 ; This function is an endpoint that loops back to itself continuously
@@ -74,7 +86,7 @@ ERROR: SJMP ERROR
 PARSE:
 ; ==- Prelude
 ACALL   INIT_XSTACK
-MOV     DPTR, #0000h   
+MOV     DPTR, #DSTART
 
 _parse_next_symbol:
 MOV     A, #00h
@@ -92,7 +104,7 @@ ACALL   REPORT_UNBALANCED_BRACKET
 ; ==- Process Symbol
 _parse_process:
 ACALL   IS_VALID_OPERATOR
-JB      F0, _parse_prepare  ; Valid symbol, ready for next
+JB      F0, _parse_prepare              ; Valid operator, ready for next
 
 _parse_opened_bracket:
 CJNE    A, #5Bh, _parse_closed_bracket  ; Check if symbol is opened bracket 
@@ -108,7 +120,7 @@ _parse_invalid_symbol:
 ACALL   REPORT_INVALID_SYMBOL
 
 _parse_prepare:
-ACALL   INC_DPTR            ; Point to next symbol
+ACALL   INC_DPTR                        ; Point to next symbol
 SJMP    _parse_next_symbol
 
 
@@ -346,7 +358,7 @@ RET
 ;
 INTERPRET:
 ; ==- Prelude
-MOV     DPTR, #0000h        ; Reset DPTR
+MOV     DPTR, #DSTART       ; Reset DPTR
 ACALL   PUSH_TPTR           ; Backup TPTR to point to table start
 ACALL   INIT_CPTR           ; Reset CPTR
 
@@ -849,6 +861,34 @@ MOV     A, #80h             ; Set cursor to start of first line
 ACALL   LCD_COMMAND
 RET
 
+
+;---------------------------------------------------------------------
+; This function moves the LCD cursor to the second line.
+;
+LCD_NEXT_LINE:
+MOV     A, #0C0h             ; Select second line
+ACALL   LCD_COMMAND
+RET
+
+
+;---------------------------------------------------------------------
+; This function sends the string data behind the DPTR start until the
+; string terminator is reached.
+;
+LCD_STR:
+MOV     A, #00h             ; Reset A before reading, so that address
+                            ; is only defined by DPTR
+MOVC    A, @A+DPTR          ; Load character from code memory
+JZ      _lcd_str_end   ; Return if terminator has been read
+
+ACALL   LCD_CHAR            ; Send character data
+ACALL   INC_DPTR            ; Increment DPTR
+SJMP    LCD_STR        ; Send next character
+
+_lcd_str_end:
+RET
+
+
 ;---------------------------------------------------------------------
 ; This function sends the data in A with the modes described by RS and
 ; RW to tbe display and waits until the controller is no longer busy.
@@ -858,6 +898,7 @@ SETB    EN
 CLR     EN
 ACALL   DELAY
 RET
+
 
 ;---------------------------------------------------------------------
 ; This function sends a command to the LCD stored in register A.
@@ -869,15 +910,24 @@ CLR     RW                  ; Set WRITE mode
 ACALL   LCD_SEND
 RET
 
+
 ;---------------------------------------------------------------------
 ; This function shows the character stored in register A.
 ; 
-LCD_DATA:
+LCD_CHAR:
 MOV     PD, A               ; Load data to port
 SETB    RS                  ; Set DATA mode
 CLR     RW                  ; Set WRITE mode
 ACALL   LCD_SEND
 RET
+
+
+;---------------------------------------------------------------------
+; This function prints the value in the DPTR register to the LCD.
+; 
+LCD_DPTR:
+RET
+
 
 ;---------------------------------------------------------------------
 ; This function delays execution until the display controller says,
@@ -892,6 +942,7 @@ SETB    EN                  ; Latch the data
 CLR     EN
 JB      PD.7, _delay_check  ; Check again, if busy flag still set
 RET
+
 
 ; ===================================================================
 ; Data Area Clear
@@ -946,7 +997,40 @@ RET
 ; This function reports an invalid symbol encountered during parsing.
 ; 
 REPORT_INVALID_SYMBOL:
-; TODO: Report invalid symbol in some manner
+; ==--- Backup
+MOV     A, #00h                 ; Backup invalid symbol into B:
+MOVC    A, @A+DPTR              ; Load byte at DPTR
+MOV     B, A                    ; Transfer A into B
+; TODO: Backup DPTR
+
+; ==--- Print
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #INVALID_SYMBOL
+ACALL   LCD_STR
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR                
+
+MOV     A, B                    ; Print invalid symbol
+ACALL   LCD_CHAR
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+ACALL   LCD_NEXT_LINE
+
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #AT_INDEX
+ACALL   LCD_STR
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+
+; TODO: Restore original DPTR and print
+ACALL   LCD_DPTR                ; Print DPTR content
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+
 ACALL   ERROR
 
 
@@ -954,7 +1038,28 @@ ACALL   ERROR
 ; This function reports an unbalanced bracket encountered during parsing.
 ;
 REPORT_UNBALANCED_BRACKET:
-; TODO: Report unbalanced bracket in some way
+; ==--- Backup
+; TODO: Backup DPTR
+
+; ==--- Print
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #UNBALANCED_BRACKET
+ACALL   LCD_STR                
+ACALL   LCD_NEXT_LINE           ; Move cursor to next line
+
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #AT_INDEX
+ACALL   LCD_STR
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+
+; TODO: Restore original DPTR and print
+ACALL   LCD_DPTR                ; Print DPTR content
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+
 ACALL   ERROR
 
 
@@ -962,5 +1067,27 @@ ACALL   ERROR
 ; This function reports too many brackets encountered during parsing.
 ;
 REPORT_TOO_MANY_BRACKETS:
-; TODO: Report too many brackets in some way
+; ==--- Backup
+; TODO: Backup DPTR
+
+; ==--- Print
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #TOO_MANY_BRACKETS
+ACALL   LCD_STR                
+ACALL   LCD_NEXT_LINE           ; Move cursor to next line
+
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #AT_INDEX
+ACALL   LCD_STR
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+
+; TODO: Restore original DPTR and print
+ACALL   LCD_DPTR                ; Print DPTR content
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+
 ACALL   ERROR
+END
