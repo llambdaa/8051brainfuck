@@ -20,7 +20,7 @@
 ORG 0300h
 DSTART  EQU 0300h
 
-CODE:  DB '?', 00h
+CODE:  DB '+++++++++++++++++++++++++++++++++++.', 00h
 
 
 ; ===================================================================
@@ -404,7 +404,7 @@ SJMP    _interp_prepare
 
 _i_is_point:
 CJNE    A, #2Eh, _i_is_comma
-NOP
+ACALL   PRINT_CHAR
 SJMP    _interp_prepare
 
 _i_is_comma:
@@ -586,6 +586,24 @@ ACALL   READ_TABLE_ENTRY        ; Load entry (symbol pointer is set
                                 ; is also backuped)
 ACALL   POP_DPTR                ; Restore DPTR
 ACALL   DEC_DPTR                ; Move behind bracket
+RET
+
+
+;---------------------------------------------------------------------
+; This function prints the symbol behind CPTR.
+;
+PRINT_CHAR:
+; ==- Prelude
+ACALL   PUSH_DPTR
+ACALL   POP_CPTR
+
+; ==- Print
+MOVX    A, @DPTR            ; Load cell value into A
+ACALL   LCD_CHAR            ; Print symbol from A
+
+; ==- Clean-Up
+ACALL   PUSH_CPTR
+ACALL   POP_DPTR
 RET
 
 
