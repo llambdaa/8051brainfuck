@@ -17,10 +17,10 @@
 ; ===================================================================
 ; Brainfuck Code with Newline Terminator
 ; ===================================================================
-ORG 0300h
-DSTART  EQU 0300h
+ORG 0400h
+DSTART  EQU 0400h
 
-CODE:  DB '+++++++++++++++++++++++++++++++++++.', 00h
+CODE:  DB '[', 00h
 
 
 ; ===================================================================
@@ -50,9 +50,8 @@ PD      EQU P2
 ORG 0000h
 MAIN:
 ACALL   LCD_INIT
-
 ACALL   USE_BANK0
-; ACALL   CLEAR_DATA_AREA
+;ACALL   CLEAR_DATA_AREA
 ACALL   PARSE
 ACALL   INTERPRET
 
@@ -684,8 +683,7 @@ MOV     A, DPL              ; Increment lower half
 ADD     A, #01h
 JNC     _store_lower_dptr   ; When no carry, the upper half
                             ; is unaffected
-
-INC     DPH                 ; Increment upper half
+; ===================================================================er half
 CLR     C                   ; Clear carry of ADD
 
 SJMP    _store_lower_dptr   ; Store lower half
@@ -944,6 +942,57 @@ RET
 ; This function prints the value in the DPTR register to the LCD.
 ; 
 LCD_DPTR:
+CLR     F0                  ; Clear F0 (when set, all leading zeroes
+                            ; have been skipped and everything
+                            ; following must be printed)
+_lcd_dptr_lower_r2:
+MOV     A, R2               ; Load R2 into A
+ACALL   LOWER_HALF
+JZ     _lcd_dptr_upper_r1   ; Jump if lower half of R2 is zero 
+
+_lcd_dptr_p_lower_r2:
+SETB    F0                  ; No more leading zeroes
+ADD     A, #30h
+ACALL   LCD_CHAR            ; Print digit
+
+_lcd_dptr_upper_r1:
+MOV     A, R1               ; Load R1 into A
+ACALL   UPPER_HALF
+JB      F0, _lcd_dptr_p_upper_r1    ; Jump to printing, when F0 set
+JZ      _lcd_dptr_lower_r1  ; Jump if upper half of R1 is zero
+
+_lcd_dptr_p_upper_r1:
+SETB    F0                  ; No more leading zeroes
+ADD     A, #30h
+ACALL   LCD_CHAR            ; Print digit
+
+_lcd_dptr_lower_r1:
+MOV     A, R1               ; Load R1 into A
+ACALL   LOWER_HALF
+JB      F0, _lcd_dptr_p_lower_r1    ; Jump to printing, when F0 set
+JZ      _lcd_dptr_upper_r0  ; Jump if lower half of R1 is zero
+
+_lcd_dptr_p_lower_r1:
+SETB    F0                  ; No more leading zeroes
+ADD     A, #30h
+ACALL   LCD_CHAR            ; Print digit
+
+_lcd_dptr_upper_r0:
+MOV     A, R0               ; Load R0 into A
+ACALL   UPPER_HALF
+JB      F0, _lcd_dptr_p_upper_r0    ; Jump to printing, when F0 set
+JZ      _lcd_dptr_lower_r0  ; Jump if upper half of R0 is zero
+
+_lcd_dptr_p_upper_r0:
+ADD     A, #30h
+ACALL   LCD_CHAR            ; Print digit
+
+_lcd_dptr_lower_r0:
+MOV     A, R0               ; Load R0 into A
+ACALL   LOWER_HALF
+ADD     A, #30h
+ACALL   LCD_CHAR            ; Print digit
+
 RET
 
 
@@ -959,6 +1008,221 @@ _delay_check:
 SETB    EN                  ; Latch the data
 CLR     EN
 JB      PD.7, _delay_check  ; Check again, if busy flag still set
+RET
+
+
+; ===================================================================
+; BCD Conversion
+; ===================================================================
+;---------------------------------------------------------------------
+; This function shifts the DPTR by one and stores the leftover bit
+; into the carry flag.
+;
+; Out: C flag
+;
+DPTR_LSHIFT:
+CLR     C                   ; Clear carry
+MOV     A, DPL              ; Move lower half into A
+RLC     A                   ; Left shift A
+MOV     DPL, A              ; Transfer back into lower half
+
+MOV     A, DPH              ; Move upper half into A
+RLC     A                   ; Left shift A
+MOV     DPH, A              ; Transfer back into upper half
+RET
+
+
+;---------------------------------------------------------------------
+; This function converts the DPTR content into its BCD equivalent
+; stored in the registers R2 to R0. For that purpose, the 'Double
+; Dabble' algorithm is used.
+;
+; In:           DPTR
+; Overwrites:   A, R4
+; Out:          R2, R1, R0 (big endian, BCD registers)
+;
+DPTR_TO_BCD:
+; ==--- Prelude
+MOV     R4, #10h            ; Declare iterator
+MOV     R2, #00h            ; Clear BDC registers
+MOV     R1, #00h
+MOV     R0, #00h
+
+; ==--- Conversion
+_dptr_to_bcd:
+MOV     A, R4               ; Load R4 into A
+JZ      _exit_dptr_to_bcd   ; Exit early if DPTR is empty
+
+DEC     A                   ; Decrement iterator
+MOV     R4, A               ; Backup iterator into R4
+
+ACALL   BCD_INCREMENT       ; Traverse nibbles and increment those
+                            ; by three with values greater or equal five
+ACALL   DPTR_LSHIFT         ; Left shift DPTR by one (setting C)
+ACALL   BCD_LSHIFT          ; Left shift the BCD registers (using C)
+SJMP _dptr_to_bcd           ; Inspect next bit
+
+_exit_dptr_to_bcd:
+RET
+
+
+;---------------------------------------------------------------------
+; This function performs one left shift across the boundaries of the
+; registers involved in the BCD transformation process. They, together,
+; then behave like a 20 bit-integer.
+;
+; Overwrite:    R2, R1, R0
+;
+BCD_LSHIFT:
+MOV     A, R0               ; Load R0 into A
+RLC     A                   ; Left shift by one - carry comes from
+                            ; integer to be converted into BCD
+MOV     R0, A               ; Load R0 from A
+
+MOV     A, R1               ; Load R1 into A
+RLC     A                   ; Left shift by one - carry comes from R0
+MOV     R1, A               ; Load R1 from A
+
+MOV     A, R2               ; Load R2 into A
+RLC     A                   ; Left shift by one - carry comes from R1
+MOV     R2, A               ; Load R2 from A
+RET
+
+
+;---------------------------------------------------------------------
+; This function searches for nibbles whose value is greater or equal
+; to five from left to right. Each one is incremented by three.
+;
+; Overwrites: R3, R2, R1, R0
+; 
+BCD_INCREMENT:
+_bcd_increment_lower_r1:
+MOV     A, R1               ; Load R1 into A
+MOV     A, R1               ; Load R1 into A
+ACALL   LOWER_HALF          ; Inspect lower half
+
+ACALL   IS_GREATER_EQUAL_FIVE         ; Check qualification for addition
+JNB     F0, _bcd_increment_upper_r1   ; Jump if smaller than five
+ADD     A, #03h                       ; Increment lower half
+
+_bcd_increment_upper_r1:
+MOV     R3, A               ; Backup lower half into R3
+MOV     A, R1               ; Load R1 into A
+ACALL   UPPER_HALF          ; Inspect upper half
+
+ACALL   IS_GREATER_EQUAL_FIVE         ; Check qualification for addition
+JNB     F0, _bcd_increment_combine_r1 ; Jump if smaller than five
+ADD     A, #03h                       ; Increment lower half
+
+_bcd_increment_combine_r1:
+ACALL   NIBBLE_LSHIFT       ; Shift theoretical upper half (currently
+                            ; in lower half) into real upper half
+ORL     A, R3               ; OR lower and upper half to full register
+MOV     R1, A
+
+_bcd_increment_lower_r0:
+MOV     A, R0               ; Load R0 into A
+ACALL   LOWER_HALF          ; Inspect lower half
+
+ACALL   IS_GREATER_EQUAL_FIVE       ; Check qualification for addition
+JNB     F0, _bcd_increment_upper_r0 ; Jump if smaller than five
+ADD     A, #03h                     ; Increment lower half
+
+_bcd_increment_upper_r0:
+MOV     R3, A               ; Backup lower half into R3
+MOV     A, R0               ; Load R0 into A
+ACALL   UPPER_HALF          ; Inspect upper half
+
+ACALL   IS_GREATER_EQUAL_FIVE         ; Check qualification for addition
+JNB     F0, _bcd_increment_combine_r0 ; Jump if smaller than five
+ADD     A, #03h                       ; Increment lower half
+
+_bcd_increment_combine_r0:
+ACALL   NIBBLE_LSHIFT       ; Shift theoretical upper half (currently
+                            ; in lower half) into real upper half
+ORL     A, R3               ; OR lower and upper half to full register
+MOV     R0, A
+RET
+
+
+;---------------------------------------------------------------------
+; This function finds the lower half of A.
+; 
+; In:           A
+; Out:          A (lower half)
+;
+LOWER_HALF:
+ANL     A, #0Fh             ; Mask b3-b0
+RET
+
+
+;---------------------------------------------------------------------
+; This function finds the upper half of A.
+; 
+; In:           A
+; Overwrites:   C
+; Out:          A (upper half)
+;
+UPPER_HALF:
+ANL     A, #0F0h            ; Mask b7-b4
+ACALL   NIBBLE_RSHIFT
+RET
+
+
+;---------------------------------------------------------------------
+; This function shifts the content of A into the right nibble, so
+; performs four right shifts.
+; 
+; In:           A
+; Out:          A (lower half)
+;
+NIBBLE_RSHIFT:
+CLR     C                   ; Prevent wrap-around effect
+RRC     A
+RRC     A
+RRC     A
+RRC     A
+RET
+
+
+;---------------------------------------------------------------------
+; This function shifts the content of A into the left nibble, so
+; performs four left shifts.
+; 
+; In:           A
+; Out:          A (upper half)
+;
+NIBBLE_LSHIFT:
+CLR     C                   ; Prevent wrap-around effect
+RLC     A
+RLC     A
+RLC     A
+RLC     A
+RET
+
+
+;---------------------------------------------------------------------
+; This function checks if A is greater or equal to 5, qualifying it
+; for an addition in the 'Double Dabble' algorithm.
+;
+; In:           A
+; Overwrites:   B
+; Out:          F0  (false = '0', true = '1')
+; Note: A is restored.
+;
+IS_GREATER_EQUAL_FIVE:
+CLR     F0                  ; Result is to be determined
+CLR     C                   ; Carry not of interest
+MOV     B, A                ; Backup A into B
+
+SUBB    A, #05                  ; Subtract 5 from A
+JC      _exit_is_greater_four   ; Jump if C set, so A < 5
+
+_is_greater_four:
+SETB    F0                  ; A is greater four
+
+_exit_is_greater_four:
+MOV     A, B                ; Restore A from B
 RET
 
 
@@ -979,7 +1243,7 @@ MOV     A, #00h             ; Zero out target byte
 MOVX    @DPTR, A
 
 ACALL   OR_DPTR             ; Or both bytes of DPTR and exit
-JZ      _exit_clear         ; if DPTR has reached zero
+JZ      _exit_clear         ; Jump if DPTR has reached zero
 
 ACALL   DEC_DPTR
 SJMP    _clear_next_byte
@@ -1019,7 +1283,7 @@ REPORT_INVALID_SYMBOL:
 MOV     A, #00h                 ; Backup invalid symbol into B:
 MOVC    A, @A+DPTR              ; Load byte at DPTR
 MOV     B, A                    ; Transfer A into B
-; TODO: Backup DPTR
+ACALL   PUSH_DPTR               ; Backup DPTR
 
 ; ==--- Print
 MOV     A, #00h                 ; Print message fragment
@@ -1043,8 +1307,16 @@ ACALL   LCD_STR
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
 
-; TODO: Restore original DPTR and print
-ACALL   LCD_DPTR                ; Print DPTR content
+ACALL   POP_DPTR                ; Restore DPTR
+CLR     C                       ; Clear C to avoid interference with
+                                ; subtraction
+MOV     A, DPH                  ; Load DPH into A
+SUBB    A, #04h                 ; Revert ORG shift of code, so that
+                                ; DPTR index starts at zero
+MOV     DPH, A                  ; Load DPH from A
+
+ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
+ACALL   LCD_DPTR                ; Print BCD representation
 
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
@@ -1057,7 +1329,7 @@ ACALL   ERROR
 ;
 REPORT_UNBALANCED_BRACKET:
 ; ==--- Backup
-; TODO: Backup DPTR
+ACALL   PUSH_DPTR               ; Backup DPTR
 
 ; ==--- Print
 MOV     A, #00h                 ; Print message fragment
@@ -1072,8 +1344,17 @@ ACALL   LCD_STR
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
 
-; TODO: Restore original DPTR and print
-ACALL   LCD_DPTR                ; Print DPTR content
+; TODO: Get index of last bracket
+ACALL   POP_DPTR                ; Restore DPTR
+CLR     C                       ; Clear C to avoid interference with
+                                ; subtraction
+MOV     A, DPH                  ; Load DPH into A
+SUBB    A, #04h                 ; Revert ORG shift of code, so that
+                                ; DPTR index starts at zero
+MOV     DPH, A                  ; Load DPH from A
+
+ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
+ACALL   LCD_DPTR                ; Print BCD representation
 
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
@@ -1086,7 +1367,7 @@ ACALL   ERROR
 ;
 REPORT_TOO_MANY_BRACKETS:
 ; ==--- Backup
-; TODO: Backup DPTR
+ACALL   PUSH_DPTR               ; Backup DPTR
 
 ; ==--- Print
 MOV     A, #00h                 ; Print message fragment
@@ -1101,8 +1382,17 @@ ACALL   LCD_STR
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
 
-; TODO: Restore original DPTR and print
-ACALL   LCD_DPTR                ; Print DPTR content
+; TODO: Change error message
+ACALL   POP_DPTR                ; Restore DPTR
+CLR     C                       ; Clear C to avoid interference with
+                                ; subtraction
+MOV     A, DPH                  ; Load DPH into A
+SUBB    A, #04h                 ; Revert ORG shift of code, so that
+                                ; DPTR index starts at zero
+MOV     DPH, A                  ; Load DPH from A
+
+ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
+ACALL   LCD_DPTR                ; Print BCD representation
 
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
