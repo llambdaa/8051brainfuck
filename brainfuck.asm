@@ -28,14 +28,15 @@
 ORG 0400h
 DSTART  EQU 0400h
 ;---------------------------------------------------------------------
-CODE:  DB '[', 00h
+CODE:  DB '[][', 00h
 
 
 ; ===================================================================
 ; Error Message Definitions
 ; ===================================================================
 INVALID_SYMBOL:     DB 'Invalid symbol ', 00h
-UNBALANCED_BRACKET: DB 'Unbalanced bracket ', 00h
+UNCLOSED_BRACKET:   DB 'Unclosed bracket ', 00h
+UNOPENED_BRACKET:   DB 'Unopened bracket ', 00h
 TOO_MANY_BRACKETS:  DB 'Too many brackets ', 00h
 AT_INDEX:           DB 'at index ', 00h
 
@@ -110,7 +111,7 @@ RET                                             ; balanced, everything is fine
 ;-----------------------------
 ; Error exit
 _parse_unbalanced_bracket:
-ACALL   REPORT_UNBALANCED_BRACKET
+ACALL   REPORT_UNCLOSED_BRACKET
 ;-----------------------------
 ; Process symbol
 _parse_process:
@@ -201,15 +202,15 @@ _handle_ob:
 ACALL   PUSH_DPTR           ; Backup DPTR
 ACALL   POP_XSTACK          ; Restore XSTACK (into DPTR)
 ;-----------------------------
-; Write opened bracket table entry
+; Write opened bracket entry onto XSTACK
 ACALL   WRITE_OPENED_BRACKET
 ;-----------------------------
 ; Move TPTR to end of table
 ACALL   PUSH_XSTACK         ; Backup XSTACK
 ACALL   POP_TPTR            ; Restore TPTR
-ACALL   TABLE_NEXT_ENTRY    ; Move TPTR by one entry
+ACALL   TABLE_NEXT_ENTRY    ; Move TPTR by one entry (write empty entry)
 ACALL   PUSH_TPTR           ; Backup TPTR
-;-----------------------------
+;-----------------------------f
 ; Cleanup
 ACALL   POP_DPTR            ; Restore DPTR
 RET
@@ -229,7 +230,7 @@ ACALL   INC_XSTACK
 
 MOV     A, R6               ; Push LH of backup DPTR
 MOVX    @DPTR, A               
-ACALL   INC_XSTACK          ; Move XSTACK pointer
+ACALL   INC_XSTACK
 
 MOV     A, R7               ; Push UH of backup DPTR
 MOVX    @DPTR, A               
@@ -251,8 +252,8 @@ HANDLE_CLOSED_BRACKET:
 ;-----------------------------
 ; Check stack size
 CJNE    R0, #0FFh, _handle_cb     ; Check if XSTACK is empty
-CJNE    R1, #0FFh, _handle_cb     ; If it is, the closing bracket is
-ACALL   REPORT_UNBALANCED_BRACKET ; not balanced
+CJNE    R1, #0FFh, _handle_cb     ; If it is, the closing bracket has
+ACALL   REPORT_UNOPENED_BRACKET   ; no corresponding open bracket
 ;-----------------------------
 ; Prelude
 _handle_cb:
@@ -294,10 +295,13 @@ RET
 
 
 ;---------------------------------------------------------------------
-; This function reads the topmost XSTACK table entry into the 3rd
-; memory bank (R0-R3).
+; This function reads the symbol pointer from the XSTACK.
 ;
-READ_TOPMOST_ENTRY:
+; In:           R0, R1
+; Overwrite:    A
+; Out:          R2, R3
+;
+READ_SYMBOL_POINTER:
 ;-----------------------------
 ; Prelude
 ACALL   USE_BANK3           ; Select 3rd memory bank
@@ -310,7 +314,14 @@ MOV     R3, A
 ACALL   DEC_XSTACK          ; Shrink XSTACK
 MOVX    A, @DPTR            ; Read symbol pointer (LH)
 MOV     R2, A               
+RET
 
+;---------------------------------------------------------------------
+; This function reads the topmost XSTACK table entry into the 3rd
+; memory bank (R0-R3).
+;
+READ_TOPMOST_ENTRY:
+ACALL   READ_SYMBOL_POINTER ; Read symbol pointer (bank 3 already set)
 ACALL   DEC_XSTACK          ; Shrink XSTACK
 MOVX    A, @DPTR            ; Read TPTR (UH)
 MOV     R1, A
@@ -1091,7 +1102,7 @@ JZ     _lcd_dptr_upper_r1   ; Jump if lower half of R2 is zero
 
 _lcd_dptr_p_lower_r2:
 SETB    F0                  ; No more leading zeroes
-ADD     A, #30h
+ADD     A, #30h             ; Adjust to ASCII table
 ACALL   LCD_CHAR            ; Print digit
 ;-----------------------------
 ; Handle R1 (upper)
@@ -1103,7 +1114,7 @@ JZ      _lcd_dptr_lower_r1  ; Jump if upper half of R1 is zero
 
 _lcd_dptr_p_upper_r1:
 SETB    F0                  ; No more leading zeroes
-ADD     A, #30h
+ADD     A, #30h             ; Adjust to ASCII table
 ACALL   LCD_CHAR            ; Print digit
 ;-----------------------------
 ; Handle R1 (lower)
@@ -1115,7 +1126,7 @@ JZ      _lcd_dptr_upper_r0  ; Jump if lower half of R1 is zero
 
 _lcd_dptr_p_lower_r1:
 SETB    F0                  ; No more leading zeroes
-ADD     A, #30h
+ADD     A, #30h             ; Adjust to ASCII table
 ACALL   LCD_CHAR            ; Print digit
 ;-----------------------------
 ; Handle R0 (upper)
@@ -1133,7 +1144,7 @@ ACALL   LCD_CHAR            ; Print digit
 _lcd_dptr_lower_r0:
 MOV     A, R0               ; Load R0 into A
 ACALL   LOWER_HALF
-ADD     A, #30h
+ADD     A, #30h             ; Adjust to ASCII table
 ACALL   LCD_CHAR            ; Print digit
 RET
 
@@ -1496,19 +1507,16 @@ ACALL   ERROR
 
 
 ;---------------------------------------------------------------------
-; This function reports an unbalanced bracket encountered during parsing.
+; This function reports an unclosed bracket encountered during parsing.
 ;
-; In:       R4, R5
-; Overwrite: A
+; In:           R4, R5
+; Overwrite:    A
 ;
-REPORT_UNBALANCED_BRACKET:
-;-----------------------------
-; Backup DPTR
-ACALL   PUSH_DPTR               ; Backup DPTR
+REPORT_UNCLOSED_BRACKET:
 ;-----------------------------
 ; Print
 MOV     A, #00h                 ; Print message fragment
-MOV     DPTR, #UNBALANCED_BRACKET
+MOV     DPTR, #UNCLOSED_BRACKET
 ACALL   LCD_STR                
 ACALL   LCD_NEXT_LINE           ; Move cursor to next line
 
@@ -1520,15 +1528,16 @@ MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
 ;-----------------------------
 ; Print index
-; TODO: Get index of last bracket
-ACALL   POP_DPTR                ; Restore DPTR
+ACALL   POP_XSTACK              ; Load XSTACK pointer to read symbol
+                                ; pointer of topmost unclosed bracket
+ACALL   READ_SYMBOL_POINTER
+MOV     A, R3                   ; Transfer symbol pointer into DPTR
+MOV     DPL, R2                 ; but put UH into A for reverting ORG
 CLR     C                       ; Clear C to avoid interference with
                                 ; subtraction
-MOV     A, DPH                  ; Load DPH into A
 SUBB    A, #04h                 ; Revert ORG shift of code, so that
                                 ; DPTR index starts at zero
 MOV     DPH, A                  ; Load DPH from A
-
 ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
 ACALL   LCD_DPTR                ; Print BCD representation
 ;-----------------------------
@@ -1538,6 +1547,9 @@ ACALL   LCD_CHAR
 
 ACALL   ERROR
 
+
+REPORT_UNOPENED_BRACKET:
+RET
 
 ;---------------------------------------------------------------------
 ; This function reports too many brackets encountered during parsing.
