@@ -15,12 +15,14 @@
 ; R1 (UH) + R1 (LH):    4. Digit and 3. Digit
 ; R0 (UH) + R0 (LH):    2. Digit and 1. Digit
 ;
-; Memory Bank [3]:
+; Memory Bank [3] (Bracket Table Generation):
 ; R7 (UH) + R6 (LH):    TPTR Before Close Bracket Entry
 ; R5 (UH) + R4 (LH):    TPTR After Close Bracket Entry
 ; R3 (UH) + R2 (LH):    Symbol Pointer
 ; R1 (UH) + R0 (LH):    TPTR Of Open Bracket
 ;
+; Memory Bank [3] (Interpretation):
+; R7 (UH):              GET_CHAR Backup (Upper Nibble)
 ;
 ; ===================================================================
 ; Brainfuck Code with Newline Terminator
@@ -28,7 +30,7 @@
 ORG 0500h
 DSTART  EQU 0500h
 ;---------------------------------------------------------------------
-CODE:  DB '++[++', 00h
+CODE:  DB ',.', 00h
 
 
 ; ===================================================================
@@ -48,6 +50,7 @@ RS      EQU P0.0
 RW      EQU P0.1
 EN      EQU P0.2
 PD      EQU P2
+KP      EQU P1
 
 
 ; ===================================================================
@@ -444,7 +447,7 @@ SJMP    _interp_prepare
 
 _i_is_comma:
 CJNE    A, #2Ch, _interp_error
-NOP
+ACALL   GET_CHAR
 
 _interp_prepare:
 ;-----------------------------
@@ -674,6 +677,41 @@ ACALL   POP_CPTR
 ; Print
 MOVX    A, @DPTR            ; Load cell value into A
 ACALL   LCD_CHAR            ; Print symbol from A
+;-----------------------------
+; Cleanup
+ACALL   PUSH_CPTR
+ACALL   POP_DPTR
+RET
+
+
+;---------------------------------------------------------------------
+; This function gets a symbol from a matrix keypad in hexadecimal.
+; For that two button presses are necessary. Each one represents a
+; hexadecimal digit (as the matrix keypad has 16 keys). The first
+; press and release indicates the upper nibble of the input, the
+; second iteration indicates the lower nibble.
+;
+; Overwrite:    R7 (Bank 3), B
+; Out:          A
+;
+GET_CHAR:
+;-----------------------------
+; Get hexadecimal character
+ACALL   USE_BANK3           ; Use 3th memory bank (for temporary data)
+ACALL   KEYPAD_CHAR         ; Get the first nibble
+ACALL   NIBBLE_LSHIFT       ; Shift the value into the upper nibble
+MOV     R7, A               ; Backup the upper nibble in R7
+
+ACALL   KEYPAD_CHAR         ; Get the second nibble
+ORL     A, R7               ; Combine both nibbles in A
+ACALL   USE_BANK0           ; Use 0th memory bank (back to normal)
+;-----------------------------
+; Prelude
+ACALL   PUSH_DPTR
+ACALL   POP_CPTR
+;-----------------------------
+; Replacement
+MOVX    @DPTR, A            ; Overwrite cell value with inputted char
 ;-----------------------------
 ; Cleanup
 ACALL   PUSH_CPTR
@@ -1014,7 +1052,7 @@ RET
 ;---------------------------------------------------------------------
 ; This function moves the LCD cursor to the second line.
 ;
-; Overwrite: A
+; Overwrite:    A
 ;
 LCD_NEXT_LINE:
 MOV     A, #0C0h             ; Select second line
@@ -1444,6 +1482,148 @@ RET
 USE_BANK3:
 SETB    RS0
 SETB    RS1
+RET
+
+
+; ===================================================================
+; Matrix Keypad
+; ===================================================================
+;---------------------------------------------------------------------
+; This function waits until the expected keypad character has been
+; selected and deselected (latched) and returns the index of the key.
+;
+; Overwrite:    B
+; Out:          A
+; 
+KEYPAD_CHAR:
+;-----------------------------
+; Key press logic
+ACALL   KEYPAD_WAIT_PRESS   ; Wait for key press and store selected column
+
+MOV     B, A                ; Backup A (column number) in B
+ACALL   KEYPAD_CHECK_ROW    ; Check for selected row and add it to column
+                            ; That results in the key index
+
+MOV     B, A                ; Backup A (row * 4 + column = index) in B
+ACALL   KEYPAD_WAIT_RELEASE ; Wait for key release
+;-----------------------------
+; Exit and restore pressed key
+MOV     A, B                ; Restore key index from B
+RET
+
+
+;---------------------------------------------------------------------
+; This function waits until a key is pressed and stores the column.
+;
+; In:           A
+; Out:          A
+; 
+KEYPAD_WAIT_PRESS:
+MOV     KP, #00001111b      ; Initialize keypad
+_keypad_wait_press_iter:
+MOV     A, KP               ; Read line data
+CJNE    A, #00001111b, _keypad_wait_pressed ; Jump if any line
+                                            ; is active             
+SJMP    _keypad_wait_press_iter ; Read until any line gets active
+
+_keypad_wait_pressed:
+ACALL   KEYPAD_TO_COLUMN    ; Calculate column number from state mask
+RET
+
+
+;---------------------------------------------------------------------
+; This function waits until a key is released again.
+;
+; In:           A
+; Out:          A
+; 
+KEYPAD_WAIT_RELEASE:
+MOV     KP, #00001111b      ; Initialize keypad
+_keypad_wait_release_iter:
+MOV     A, KP               ; Read lines
+CJNE    A, #00001111b, _keypad_wait_release_iter    ; Read until all lines
+                                                    ; are back to normal
+RET
+
+
+;---------------------------------------------------------------------
+; This function calculates the column number from the matrix line state.
+;
+; Out:          A
+; 
+KEYPAD_TO_COLUMN:
+JB      KP.3, _keypad_to_column_one ; Jump to check next column
+MOV     A, #00h                     ; 0th column is active
+SJMP    _keypad_to_column_exit
+
+_keypad_to_column_one:
+JB      KP.2, _keypad_to_column_two ; Jump to check next column
+MOV     A, #01h                     ; 1st column is active
+SJMP    _keypad_to_column_exit
+
+_keypad_to_column_two:
+JB      KP.1, _keypad_to_column_three   ; Jump to check next column
+MOV     A, #02h                         ; 3rd column is active
+SJMP    _keypad_to_column_exit
+
+_keypad_to_column_three:
+MOV     A, #03h                     ; 4th column must be active
+
+_keypad_to_column_exit:
+RET
+
+
+;---------------------------------------------------------------------
+; This function checks for the selected keypad row and adds its
+; offset to A
+;
+; In:           B
+; Out:          A
+; 
+KEYPAD_CHECK_ROW:  
+;-----------------------------
+; Check 0th row
+_keypad_row_zero:
+MOV     KP, #01111111b      ; Check if 0th row is correct
+MOV     A, KP               ; Read lines
+CJNE    A, #01111111b, _keypad_row_zero_correct ; 0th row is correct
+SJMP    _keypad_row_one     ; Check if 1st row is correct
+
+_keypad_row_zero_correct:
+MOV     A, B                ; Restore column number from B
+ADD     A, #00h
+SJMP    _keypad_check_row_exit
+;-----------------------------
+; Check 1st row
+_keypad_row_one:
+MOV     KP, #10111111b      ; Check if 1st row is correct
+MOV     A, KP               ; Read lines
+CJNE    A, #10111111b, _keypad_row_one_correct  ; 2nd row is correct
+SJMP    _keypad_row_two     ; Check if 2nd row is correct
+
+_keypad_row_one_correct:
+MOV     A, B                ; Restore column number from B
+ADD     A, #04h
+SJMP    _keypad_check_row_exit
+;-----------------------------
+; Check 2nd row
+_keypad_row_two:
+MOV     KP, #11011111b      ; Check if 2nd row is correct
+MOV     A, KP               ; Read lines
+CJNE    A, #11011111b, _keypad_row_two_correct ; 2nd row is correct
+SJMP    _keypad_row_three   ; Check if 3rd row is correct
+
+_keypad_row_two_correct:
+MOV     A, B                ; Restore column number from B
+ADD     A, #08h
+SJMP    _keypad_check_row_exit
+;-----------------------------
+; Check 3rd row (must be selected, because all others are not)
+_keypad_row_three:
+MOV     A, B                ; Restore column number from B
+ADD     A, #0Ch
+
+_keypad_check_row_exit:
 RET
 
 
