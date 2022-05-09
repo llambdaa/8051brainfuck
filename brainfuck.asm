@@ -25,19 +25,19 @@
 ; ===================================================================
 ; Brainfuck Code with Newline Terminator
 ; ===================================================================
-ORG 0400h
-DSTART  EQU 0400h
+ORG 0500h
+DSTART  EQU 0500h
 ;---------------------------------------------------------------------
-CODE:  DB '[][', 00h
+CODE:  DB '++[++', 00h
 
 
 ; ===================================================================
 ; Error Message Definitions
 ; ===================================================================
 INVALID_SYMBOL:     DB 'Invalid symbol ', 00h
-UNCLOSED_BRACKET:   DB 'Unclosed bracket ', 00h
-UNOPENED_BRACKET:   DB 'Unopened bracket ', 00h
-TOO_MANY_BRACKETS:  DB 'Too many brackets ', 00h
+UNCLOSED_BRACKET:   DB 'Unclosed bracket', 00h
+UNOPENED_BRACKET:   DB 'Unopened bracket', 00h
+TOO_MANY_PAIRS:     DB 'Too many pairs', 00h
 AT_INDEX:           DB 'at index ', 00h
 
 
@@ -194,7 +194,7 @@ HANDLE_OPENED_BRACKET:
 ;-----------------------------
 ; Check bracket count
 CJNE    R5, #08h, _handle_ob        ; Check upper half to TPTR to see
-ACALL   REPORT_TOO_MANY_BRACKETS    ; if bracket entry is beyond table
+ACALL   REPORT_TOO_MANY_PAIRS       ; if bracket entry is beyond table
                                     ; boundary
 ;-----------------------------
 ; Prelude
@@ -1451,6 +1451,63 @@ RET
 ; Error Handling
 ; ===================================================================
 ;---------------------------------------------------------------------
+; This function shifts the DPTR to revert the ORG directive, making
+; symbol indices start at zero.
+;
+SHIFT_DPTR:
+CLR     C                       ; Clear C to avoid interference with
+                                ; subtraction
+SUBB    A, #05h                 ; Revert ORG shift of code, so that
+                                ; DPTR index starts at zero
+MOV     DPH, A                  ; Load DPH from A
+RET
+
+
+;---------------------------------------------------------------------
+; This function prints the index relevant for an error, when it can
+; directly be deduced from the content in DPTR.
+;
+; In:           R4, R5
+; Overwrite:    A
+;
+PRINT_DPTR_INDEX:
+ACALL   POP_DPTR                ; Restore DPTR
+MOV     A, DPH                  ; Load DPH into A
+ACALL   SHIFT_DPTR              ; Revert ORG offset
+ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
+ACALL   LCD_DPTR                ; Print BCD representation
+RET
+
+
+;---------------------------------------------------------------------
+; This function prints the "at index '<index>'" message fragment in
+; the second line.
+;
+; In:           R4, R5
+; Overwrite:    A
+;
+PRINT_AT_INDEX:
+;-----------------------------
+; Print
+ACALL   LCD_NEXT_LINE           ; Move cursor to second line
+
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #AT_INDEX
+ACALL   LCD_STR
+
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+;-----------------------------
+; Print index
+ACALL   PRINT_DPTR_INDEX        ; Print index from DPTR content
+;-----------------------------
+; Print
+MOV     A, #27h                 ; Print ' symbol
+ACALL   LCD_CHAR
+
+RET
+
+;---------------------------------------------------------------------
 ; This function reports an invalid symbol encountered during parsing.
 ; 
 ; In:           R4, R5
@@ -1477,30 +1534,8 @@ ACALL   LCD_CHAR
 
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
-ACALL   LCD_NEXT_LINE
 
-MOV     A, #00h                 ; Print message fragment
-MOV     DPTR, #AT_INDEX
-ACALL   LCD_STR
-
-MOV     A, #27h                 ; Print ' symbol
-ACALL   LCD_CHAR
-;-----------------------------
-; Print index
-ACALL   POP_DPTR                ; Restore DPTR
-CLR     C                       ; Clear C to avoid interference with
-                                ; subtraction
-MOV     A, DPH                  ; Load DPH into A
-SUBB    A, #04h                 ; Revert ORG shift of code, so that
-                                ; DPTR index starts at zero
-MOV     DPH, A                  ; Load DPH from A
-
-ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
-ACALL   LCD_DPTR                ; Print BCD representation
-;-----------------------------
-; Print
-MOV     A, #27h                 ; Print ' symbol
-ACALL   LCD_CHAR
+ACALL   PRINT_AT_INDEX          ; Print message fragment
 ;-----------------------------
 ; Error exit
 ACALL   ERROR
@@ -1533,64 +1568,57 @@ ACALL   POP_XSTACK              ; Load XSTACK pointer to read symbol
 ACALL   READ_SYMBOL_POINTER
 MOV     A, R3                   ; Transfer symbol pointer into DPTR
 MOV     DPL, R2                 ; but put UH into A for reverting ORG
-CLR     C                       ; Clear C to avoid interference with
-                                ; subtraction
-SUBB    A, #04h                 ; Revert ORG shift of code, so that
-                                ; DPTR index starts at zero
-MOV     DPH, A                  ; Load DPH from A
+ACALL   SHIFT_DPTR              ; Revert ORG offset
 ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
 ACALL   LCD_DPTR                ; Print BCD representation
 ;-----------------------------
 ; Print
 MOV     A, #27h                 ; Print ' symbol
 ACALL   LCD_CHAR
-
+;-----------------------------
+; Error exit
 ACALL   ERROR
 
 
-REPORT_UNOPENED_BRACKET:
-RET
-
 ;---------------------------------------------------------------------
-; This function reports too many brackets encountered during parsing.
+; This function reports an unopened bracket encountered during parsing.
 ;
 ; In:           R4, R5
 ; Overwrite:    A
 ;
-REPORT_TOO_MANY_BRACKETS:
+REPORT_UNOPENED_BRACKET:
 ;-----------------------------
 ; Backup DPTR
 ACALL   PUSH_DPTR               ; Backup DPTR
 ;-----------------------------
 ; Print
 MOV     A, #00h                 ; Print message fragment
-MOV     DPTR, #TOO_MANY_BRACKETS
+MOV     DPTR, #UNOPENED_BRACKET
 ACALL   LCD_STR                
-ACALL   LCD_NEXT_LINE           ; Move cursor to next line
-
-MOV     A, #00h                 ; Print message fragment
-MOV     DPTR, #AT_INDEX
-ACALL   LCD_STR
-
-MOV     A, #27h                 ; Print ' symbol
-ACALL   LCD_CHAR
+ACALL   PRINT_AT_INDEX          ; Print message fragment
 ;-----------------------------
-; Print index
-; TODO: Change error message
-ACALL   POP_DPTR                ; Restore DPTR
-CLR     C                       ; Clear C to avoid interference with
-                                ; subtraction
-MOV     A, DPH                  ; Load DPH into A
-SUBB    A, #04h                 ; Revert ORG shift of code, so that
-                                ; DPTR index starts at zero
-MOV     DPH, A                  ; Load DPH from A
+; Error exit
+ACALL   ERROR
+RET
 
-ACALL   DPTR_TO_BCD             ; Convert DPTR to BCD
-ACALL   LCD_DPTR                ; Print BCD representation
+;---------------------------------------------------------------------
+; This function reports too many bracket pairs encountered during parsing.
+; They are indicated by opening brackets.
+;
+; In:           R4, R5
+; Overwrite:    A
+;
+REPORT_TOO_MANY_PAIRS:
+;-----------------------------
+; Backup DPTR
+ACALL   PUSH_DPTR               ; Backup DPTR
 ;-----------------------------
 ; Print
-MOV     A, #27h                 ; Print ' symbol
-ACALL   LCD_CHAR
-
+MOV     A, #00h                 ; Print message fragment
+MOV     DPTR, #TOO_MANY_PAIRS
+ACALL   LCD_STR 
+ACALL   PRINT_AT_INDEX          ; Print message fragment
+;-----------------------------
+; Error exit
 ACALL   ERROR
 END
