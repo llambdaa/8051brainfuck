@@ -30,7 +30,7 @@
 ORG 0500h
 DSTART  EQU 0500h
 ;---------------------------------------------------------------------
-CODE:  DB ',.', 00h
+CODE:  DB '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.', 00h
 
 
 ; ===================================================================
@@ -396,7 +396,7 @@ INTERPRET:
 ;-----------------------------
 ; Prelude
 MOV     DPTR, #DSTART       ; Set DPTR to start of code
-ACALL   PUSH_TPTR           ; Backup TPTR to point to table start
+ACALL   INIT_TPTR           ; Initialize TPTR
 ACALL   INIT_CPTR           ; Initialize CPTR
 ;-----------------------------
 ; Read symbol
@@ -819,6 +819,17 @@ SJMP    _store_lower_dptr   ; Store lower half
 ; ===================================================================
 ; Table Pointer (TPTR) Handling
 ; ===================================================================
+;---------------------------------------------------------------------
+; This function initializes the TPTR to point to the table's start.
+;
+; Out:          R2, R3
+;
+INIT_TPTR:
+MOV     R4, #00h
+MOV     R5, #00h
+RET
+
+
 ;---------------------------------------------------------------------
 ; This function "pushes" TPTR by storing it into R5 (UH) and R4 (LH)
 ; in order to avoid pushing onto the regular stack. Doing so makes it
